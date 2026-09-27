@@ -1,0 +1,26 @@
+#ignorar variables de entorno
+.env
+
+#ignorar archivos de log
+*.log
+
+#ignorar dependencias de node
+node_modules/
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Variables de entorno
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/

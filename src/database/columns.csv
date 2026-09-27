@@ -1,0 +1,289 @@
+table_name              , column_name               , data_type, ordinal_position
+branches                , branch_id                 , VARCHAR  ,                1
+branches                , branch_code               , VARCHAR  ,                2
+branches                , branch_name               , VARCHAR  ,                3
+branches                , branch_type               , VARCHAR  ,                4
+branches                , address                   , VARCHAR  ,                5
+branches                , city                      , VARCHAR  ,                6
+branches                , state                     , VARCHAR  ,                7
+branches                , country                   , VARCHAR  ,                8
+branches                , postal_code               , VARCHAR  ,                9
+branches                , geographic_zone           , VARCHAR  ,               10
+branches                , phone                     , VARCHAR  ,               11
+branches                , email                     , VARCHAR  ,               12
+branches                , opening_time              , TIME     ,               13
+branches                , closing_time              , TIME     ,               14
+branches                , has_atms                  , BOOLEAN  ,               15
+branches                , atm_count                 , BIGINT   ,               16
+branches                , has_teller_windows        , BOOLEAN  ,               17
+branches                , teller_window_count       , BIGINT   ,               18
+branches                , latitude                  , DOUBLE   ,               19
+branches                , longitude                 , DOUBLE   ,               20
+branches                , branch_opening_date       , DATE     ,               21
+branches                , branch_status             , VARCHAR  ,               22
+call_center_interactions, interaction_id            , VARCHAR  ,                1
+call_center_interactions, interaction_date          , TIMESTAMP,                2
+call_center_interactions, process_date              , DATE     ,                3
+call_center_interactions, customer_id               , VARCHAR  ,                4
+call_center_interactions, agent_id                  , VARCHAR  ,                5
+call_center_interactions, interaction_type          , VARCHAR  ,                6
+call_center_interactions, channel                   , VARCHAR  ,                7
+call_center_interactions, contact_reason            , VARCHAR  ,                8
+call_center_interactions, reason_category           , VARCHAR  ,                9
+call_center_interactions, duration_seconds          , DOUBLE   ,               10
+call_center_interactions, wait_time_seconds         , DOUBLE   ,               11
+call_center_interactions, was_resolved              , BOOLEAN  ,               12
+call_center_interactions, requires_followup         , BOOLEAN  ,               13
+call_center_interactions, detected_sentiment        , VARCHAR  ,               14
+call_center_interactions, sentiment_score           , DOUBLE   ,               15
+call_center_interactions, customer_detected_accent  , VARCHAR  ,               16
+call_center_interactions, agent_used_accent         , VARCHAR  ,               17
+call_center_interactions, was_escalated             , BOOLEAN  ,               18
+call_center_interactions, mentioned_products        , VARCHAR  ,               19
+call_center_interactions, has_transcript            , BOOLEAN  ,               20
+call_center_interactions, has_recording             , BOOLEAN  ,               21
+call_center_interactions, filename                  , VARCHAR  ,               22
+call_center_interactions, day                       , VARCHAR  ,               23
+call_center_interactions, month                     , VARCHAR  ,               24
+call_center_interactions, year                      , BIGINT   ,               25
+call_transcripts        , transcript_id             , VARCHAR  ,                1
+call_transcripts        , interaction_id            , VARCHAR  ,                2
+call_transcripts        , process_date              , DATE     ,                3
+call_transcripts        , customer_id               , VARCHAR  ,                4
+call_transcripts        , agent_id                  , VARCHAR  ,                5
+call_transcripts        , full_text                 , VARCHAR  ,                6
+call_transcripts        , customer_text             , VARCHAR  ,                7
+call_transcripts        , agent_text                , VARCHAR  ,                8
+call_transcripts        , detected_language         , VARCHAR  ,                9
+call_transcripts        , detected_accent           , VARCHAR  ,               10
+call_transcripts        , accent_confidence         , DOUBLE   ,               11
+call_transcripts        , detected_keywords         , VARCHAR  ,               12
+call_transcripts        , mentioned_entities        , VARCHAR  ,               13
+call_transcripts        , detected_intents          , VARCHAR  ,               14
+call_transcripts        , main_topics               , VARCHAR  ,               15
+call_transcripts        , transcription_model       , VARCHAR  ,               16
+call_transcripts        , audio_quality             , VARCHAR  ,               17
+call_transcripts        , duration_seconds          , DOUBLE   ,               18
+call_transcripts        , filename                  , VARCHAR  ,               19
+call_transcripts        , day                       , VARCHAR  ,               20
+call_transcripts        , month                     , VARCHAR  ,               21
+call_transcripts        , year                      , BIGINT   ,               22
+campaign_sends          , send_id                   , VARCHAR  ,                1
+campaign_sends          , send_date                 , TIMESTAMP,                2
+campaign_sends          , process_date              , DATE     ,                3
+campaign_sends          , campaign_id               , VARCHAR  ,                4
+campaign_sends          , customer_id               , VARCHAR  ,                5
+campaign_sends          , send_channel              , VARCHAR  ,                6
+campaign_sends          , template_used             , VARCHAR  ,                7
+campaign_sends          , subject                   , VARCHAR  ,                8
+campaign_sends          , send_status               , VARCHAR  ,                9
+campaign_sends          , was_delivered             , BOOLEAN  ,               10
+campaign_sends          , was_opened                , BOOLEAN  ,               11
+campaign_sends          , open_date                 , TIMESTAMP,               12
+campaign_sends          , was_clicked               , BOOLEAN  ,               13
+campaign_sends          , click_date                , TIMESTAMP,               14
+campaign_sends          , click_count               , DOUBLE   ,               15
+campaign_sends          , had_conversion            , BOOLEAN  ,               16
+campaign_sends          , conversion_date           , TIMESTAMP,               17
+campaign_sends          , conversion_value          , DOUBLE   ,               18
+campaign_sends          , open_device               , VARCHAR  ,               19
+campaign_sends          , open_country              , VARCHAR  ,               20
+campaign_sends          , failure_reason            , VARCHAR  ,               21
+campaign_sends          , send_cost                 , DOUBLE   ,               22
+campaign_sends          , filename                  , VARCHAR  ,               23
+campaign_sends          , day                       , VARCHAR  ,               24
+campaign_sends          , month                     , VARCHAR  ,               25
+campaign_sends          , year                      , BIGINT   ,               26
+complaints              , complaint_id              , VARCHAR  ,                1
+complaints              , creation_date             , TIMESTAMP,                2
+complaints              , process_date              , DATE     ,                3
+complaints              , customer_id               , VARCHAR  ,                4
+complaints              , case_type                 , VARCHAR  ,                5
+complaints              , category                  , VARCHAR  ,                6
+complaints              , subcategory               , VARCHAR  ,                7
+complaints              , reception_channel         , VARCHAR  ,                8
+complaints              , affected_product_id       , VARCHAR  ,                9
+complaints              , related_branch_id         , VARCHAR  ,               10
+complaints              , origin_interaction_id     , VARCHAR  ,               11
+complaints              , description               , VARCHAR  ,               12
+complaints              , claimed_amount            , DOUBLE   ,               13
+complaints              , currency                  , VARCHAR  ,               14
+complaints              , priority                  , VARCHAR  ,               15
+complaints              , status                    , VARCHAR  ,               16
+complaints              , assigned_agent_id         , VARCHAR  ,               17
+complaints              , assignment_date           , TIMESTAMP,               18
+complaints              , first_response_date       , TIMESTAMP,               19
+complaints              , resolution_date           , TIMESTAMP,               20
+complaints              , closing_date              , TIMESTAMP,               21
+complaints              , sla_breached              , BOOLEAN  ,               22
+complaints              , resolution_days           , DOUBLE   ,               23
+complaints              , resolution                , VARCHAR  ,               24
+complaints              , compensation_granted      , DOUBLE   ,               25
+complaints              , resolution_satisfaction   , DOUBLE   ,               26
+complaints              , is_repeat_complainer      , BOOLEAN  ,               27
+complaints              , filename                  , VARCHAR  ,               28
+complaints              , day                       , VARCHAR  ,               29
+complaints              , month                     , VARCHAR  ,               30
+complaints              , year                      , BIGINT   ,               31
+customers               , customer_id               , VARCHAR  ,                1
+customers               , document_number           , VARCHAR  ,                2
+customers               , document_type             , VARCHAR  ,                3
+customers               , first_name                , VARCHAR  ,                4
+customers               , last_name                 , VARCHAR  ,                5
+customers               , date_of_birth             , DATE     ,                6
+customers               , gender                    , VARCHAR  ,                7
+customers               , email                     , VARCHAR  ,                8
+customers               , mobile_phone              , VARCHAR  ,                9
+customers               , landline_phone            , VARCHAR  ,               10
+customers               , address                   , VARCHAR  ,               11
+customers               , city                      , VARCHAR  ,               12
+customers               , state                     , VARCHAR  ,               13
+customers               , country                   , VARCHAR  ,               14
+customers               , postal_code               , VARCHAR  ,               15
+customers               , detected_accent           , VARCHAR  ,               16
+customers               , segment                   , VARCHAR  ,               17
+customers               , credit_score              , DOUBLE   ,               18
+customers               , estimated_monthly_income  , DOUBLE   ,               19
+customers               , occupation                , VARCHAR  ,               20
+customers               , marital_status            , VARCHAR  ,               21
+customers               , education_level           , VARCHAR  ,               22
+customers               , registration_date         , TIMESTAMP,               23
+customers               , registration_branch_id    , VARCHAR  ,               24
+customers               , customer_status           , VARCHAR  ,               25
+customers               , last_updated              , TIMESTAMP,               26
+customers               , accepts_marketing         , BOOLEAN  ,               27
+daily_exchange_rates    , date                      , DATE     ,                1
+daily_exchange_rates    , source_currency           , VARCHAR  ,                2
+daily_exchange_rates    , target_currency           , VARCHAR  ,                3
+daily_exchange_rates    , exchange_rate             , DOUBLE   ,                4
+daily_exchange_rates    , buy_rate                  , DOUBLE   ,                5
+daily_exchange_rates    , sell_rate                 , DOUBLE   ,                6
+daily_exchange_rates    , source                    , VARCHAR  ,                7
+digital_events          , event_id                  , VARCHAR  ,                1
+digital_events          , event_date                , TIMESTAMP,                2
+digital_events          , process_date              , DATE     ,                3
+digital_events          , customer_id               , VARCHAR  ,                4
+digital_events          , session_id                , VARCHAR  ,                5
+digital_events          , event_type                , VARCHAR  ,                6
+digital_events          , event_category            , VARCHAR  ,                7
+digital_events          , channel                   , VARCHAR  ,                8
+digital_events          , platform                  , VARCHAR  ,                9
+digital_events          , browser                   , VARCHAR  ,               10
+digital_events          , app_version               , VARCHAR  ,               11
+digital_events          , page_url                  , VARCHAR  ,               12
+digital_events          , page_title                , VARCHAR  ,               13
+digital_events          , action                    , VARCHAR  ,               14
+digital_events          , element_id                , VARCHAR  ,               15
+digital_events          , product_id                , VARCHAR  ,               16
+digital_events          , event_value               , DOUBLE   ,               17
+digital_events          , duration_seconds          , DOUBLE   ,               18
+digital_events          , ip_address                , VARCHAR  ,               19
+digital_events          , ip_country                , VARCHAR  ,               20
+digital_events          , ip_city                   , VARCHAR  ,               21
+digital_events          , is_mobile                 , BOOLEAN  ,               22
+digital_events          , referrer                  , VARCHAR  ,               23
+digital_events          , utm_source                , VARCHAR  ,               24
+digital_events          , utm_medium                , VARCHAR  ,               25
+digital_events          , utm_campaign              , VARCHAR  ,               26
+digital_events          , filename                  , VARCHAR  ,               27
+digital_events          , day                       , VARCHAR  ,               28
+digital_events          , month                     , VARCHAR  ,               29
+digital_events          , year                      , BIGINT   ,               30
+marketing_campaigns     , campaign_id               , VARCHAR  ,                1
+marketing_campaigns     , campaign_name             , VARCHAR  ,                2
+marketing_campaigns     , description               , VARCHAR  ,                3
+marketing_campaigns     , campaign_type             , VARCHAR  ,                4
+marketing_campaigns     , campaign_objective        , VARCHAR  ,                5
+marketing_campaigns     , promoted_product          , VARCHAR  ,                6
+marketing_campaigns     , target_segment            , VARCHAR  ,                7
+marketing_campaigns     , target_country            , VARCHAR  ,                8
+marketing_campaigns     , start_date                , DATE     ,                9
+marketing_campaigns     , end_date                  , DATE     ,               10
+marketing_campaigns     , budget                    , DOUBLE   ,               11
+marketing_campaigns     , campaign_status           , VARCHAR  ,               12
+marketing_campaigns     , expected_conversion_rate  , DOUBLE   ,               13
+products                , product_id                , VARCHAR  ,                1
+products                , customer_id               , VARCHAR  ,                2
+products                , product_type              , VARCHAR  ,                3
+products                , product_number            , VARCHAR  ,                4
+products                , currency                  , VARCHAR  ,                5
+products                , current_balance           , DOUBLE   ,                6
+products                , credit_limit              , DOUBLE   ,                7
+products                , interest_rate             , DOUBLE   ,                8
+products                , opening_date              , DATE     ,                9
+products                , expiration_date           , DATE     ,               10
+products                , opening_branch_id         , VARCHAR  ,               11
+products                , product_status            , VARCHAR  ,               12
+products                , opening_channel           , VARCHAR  ,               13
+products                , has_linked_app            , BOOLEAN  ,               14
+products                , days_past_due             , DOUBLE   ,               15
+products                , last_transaction_date     , TIMESTAMP,               16
+products                , last_updated              , TIMESTAMP,               17
+satisfaction_surveys    , survey_id                 , VARCHAR  ,                1
+satisfaction_surveys    , survey_date               , TIMESTAMP,                2
+satisfaction_surveys    , process_date              , DATE     ,                3
+satisfaction_surveys    , interaction_id            , VARCHAR  ,                4
+satisfaction_surveys    , customer_id               , VARCHAR  ,                5
+satisfaction_surveys    , agent_id                  , VARCHAR  ,                6
+satisfaction_surveys    , survey_type               , VARCHAR  ,                7
+satisfaction_surveys    , send_channel              , VARCHAR  ,                8
+satisfaction_surveys    , main_score                , BIGINT   ,                9
+satisfaction_surveys    , nps_category              , VARCHAR  ,               10
+satisfaction_surveys    , question_1_text           , VARCHAR  ,               11
+satisfaction_surveys    , question_1_response       , DOUBLE   ,               12
+satisfaction_surveys    , question_2_text           , VARCHAR  ,               13
+satisfaction_surveys    , question_2_response       , DOUBLE   ,               14
+satisfaction_surveys    , question_3_text           , VARCHAR  ,               15
+satisfaction_surveys    , question_3_response       , DOUBLE   ,               16
+satisfaction_surveys    , open_comments             , VARCHAR  ,               17
+satisfaction_surveys    , comment_sentiment         , VARCHAR  ,               18
+satisfaction_surveys    , response_time_hours       , DOUBLE   ,               19
+satisfaction_surveys    , campaign_response_rate    , DOUBLE   ,               20
+satisfaction_surveys    , filename                  , VARCHAR  ,               21
+satisfaction_surveys    , day                       , VARCHAR  ,               22
+satisfaction_surveys    , month                     , VARCHAR  ,               23
+satisfaction_surveys    , year                      , BIGINT   ,               24
+service_agents          , agent_id                  , VARCHAR  ,                1
+service_agents          , employee_code             , VARCHAR  ,                2
+service_agents          , first_name                , VARCHAR  ,                3
+service_agents          , last_name                 , VARCHAR  ,                4
+service_agents          , email                     , VARCHAR  ,                5
+service_agents          , phone                     , VARCHAR  ,                6
+service_agents          , native_accent             , VARCHAR  ,                7
+service_agents          , country_of_origin         , VARCHAR  ,                8
+service_agents          , assigned_branch_id        , VARCHAR  ,                9
+service_agents          , agent_type                , VARCHAR  ,               10
+service_agents          , experience_level          , VARCHAR  ,               11
+service_agents          , languages                 , VARCHAR  ,               12
+service_agents          , specialty                 , VARCHAR  ,               13
+service_agents          , hire_date                 , DATE     ,               14
+service_agents          , avg_csat                  , DOUBLE   ,               15
+service_agents          , total_monthly_interactions, DOUBLE   ,               16
+service_agents          , agent_status              , VARCHAR  ,               17
+service_agents          , work_shift                , VARCHAR  ,               18
+transactions            , transaction_id            , VARCHAR  ,                1
+transactions            , transaction_date          , TIMESTAMP,                2
+transactions            , process_date              , DATE     ,                3
+transactions            , product_id                , VARCHAR  ,                4
+transactions            , customer_id               , VARCHAR  ,                5
+transactions            , transaction_type          , VARCHAR  ,                6
+transactions            , transaction_category      , VARCHAR  ,                7
+transactions            , amount                    , DOUBLE   ,                8
+transactions            , currency                  , VARCHAR  ,                9
+transactions            , amount_usd                , DOUBLE   ,               10
+transactions            , channel                   , VARCHAR  ,               11
+transactions            , branch_id                 , VARCHAR  ,               12
+transactions            , merchant_name             , VARCHAR  ,               13
+transactions            , merchant_category         , VARCHAR  ,               14
+transactions            , transaction_country       , VARCHAR  ,               15
+transactions            , transaction_city          , VARCHAR  ,               16
+transactions            , transaction_status        , VARCHAR  ,               17
+transactions            , response_code             , VARCHAR  ,               18
+transactions            , is_fraud                  , BOOLEAN  ,               19
+transactions            , fraud_score               , DOUBLE   ,               20
+transactions            , latitude                  , DOUBLE   ,               21
+transactions            , longitude                 , DOUBLE   ,               22
+transactions            , filename                  , VARCHAR  ,               23
+transactions            , day                       , VARCHAR  ,               24
+transactions            , month                     , VARCHAR  ,               25
+transactions            , year                      , BIGINT   ,               26
