@@ -368,6 +368,25 @@ def open_case(customer_id: str, tx_ids: list[str] | None = None, days: int = fa.
     return case
 
 
+def open_chat_case(customer_id: str, tx_ids: list[str], comment: str) -> dict:
+    """Case opened from the customer chat (fraud_agent.py) when the customer asks for a human.
+    No OTP is sent: it only records the dispute so the escalation has a case to point to."""
+    profile = fa.get_customer_profile(customer_id) or {"customer_id": customer_id}
+    email, whatsapp = fa.resolve_recipients(profile)
+    case = {"case_id": new_id("CASE"), "customer_id": customer_id, "source": "customer_chat",
+            "transaction_ids": ",".join(tx_ids), "contact_email": email,
+            "contact_whatsapp": normalize_phone(whatsapp)}
+    fa.con.execute(
+        f"""INSERT INTO {table('fraud_cases')} (case_id, customer_id, created_at, updated_at, source,
+                transaction_ids, max_score, reasons, contact_email, contact_whatsapp, demo_mode,
+                status, customer_comment)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)""",
+        [case["case_id"], customer_id, now(), now(), "customer_chat", case["transaction_ids"],
+         "Reportado por el cliente en el chat", email, case["contact_whatsapp"], fa.DEMO_MODE,
+         ST_FRAUD, comment[:500]])
+    return case
+
+
 def open_cases_for_customers(customer_ids: list[str], days: int = fa.DEFAULT_DAYS,
                              scores: dict[str, float] | None = None) -> list[dict]:
     """Batch entry point for the anomaly model: one case per flagged customer."""

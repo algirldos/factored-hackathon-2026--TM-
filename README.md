@@ -4,7 +4,7 @@ An AI agent that detects suspicious card transactions and alerts customers by em
 Built for the **Factored AI & Data Hackathon 2026** on top of the synthetic LATAM Bank dataset.
 
 - **Data:** MotherDuck (`latam_bank` database, `bronze` layer)
-- **LLM:** Google Gemini (function calling)
+- **LLM:** Claude (Anthropic API), local models via Ollama, or Google Gemini (tool calling)
 - **Alerts:** SMTP email and WhatsApp (Twilio)
 
 The agent talks to an authenticated customer, reviews their transactions, explains why a
@@ -136,19 +136,23 @@ The default window is **180 days**. The dataset has ~5M transactions for 150k cu
 3 years, about 33 per customer (one or two a month), so a 30-day window usually holds a single
 transaction and gives the rules nothing to compare.
 
-### Language model: local (Ollama) or Gemini
+### Language model: Claude, local (Ollama) or Gemini
 
 `LLM_PROVIDER` chooses the model behind the agent. Everything else (tools, OTP gate, routing,
 tables) is identical, because both providers expose the same small interface
 (`create_llm_session` in `fraud_agent.py`).
 
-| | `ollama` (default) | `gemini` |
-|---|---|---|
-| Runs | On your machine | Google API |
-| Quota / cost | None | Free tier: ~20 requests per day per model; paid beyond |
-| Internet | Not needed for the model | Required |
-| Quality | Good with 4B models for this task; slower on CPU | Higher |
-| Data | Never leaves the machine | Sent to Google |
+| | `anthropic` (default) | `ollama` | `gemini` |
+|---|---|---|---|
+| Runs | Claude API | On your machine | Google API |
+| Quota / cost | Pay per use (API credits) | None | Free tier: ~20 requests per day per model; paid beyond |
+| Internet | Required | Not needed for the model | Required |
+| Quality | Highest | Good with 4B models; slower on CPU | High |
+| Data | Sent to Anthropic | Never leaves the machine | Sent to Google |
+
+With Claude, `AnthropicChat` runs the tool-use loop of the Messages API: while the response's
+`stop_reason` is `tool_use`, each requested tool runs and its `tool_result` goes back to the model.
+Overload (529) is retried and then falls back along `ANTHROPIC_FALLBACK_MODELS`.
 
 With Ollama, the tool-calling loop is implemented in `OllamaChat`: tool schemas are generated
 from each function's type hints and docstring, arguments are coerced (small models often send
@@ -459,7 +463,10 @@ python fraud_agent.py --customer <ID>    # start the chat
 | `TRANSACTIONS_TABLE` | | `bronze.transactions` | Transactions table |
 | `CUSTOMERS_TABLE` | | `bronze.customers` | Customers table |
 | `PRODUCTS_TABLE` | | `bronze.products` | Products table (card type and last 4 digits for alerts) |
-| `LLM_PROVIDER` | | `ollama` | `ollama` (local models) or `gemini` |
+| `LLM_PROVIDER` | | `anthropic` | `anthropic` (Claude), `ollama` (local models) or `gemini` |
+| `ANTHROPIC_API_KEY` | anthropic | | Claude API key |
+| `ANTHROPIC_MODEL` | | `claude-sonnet-5-5` | Claude model |
+| `ANTHROPIC_FALLBACK_MODELS` | | `claude-haiku-4-5-20251001` | Comma-separated fallback chain |
 | `OLLAMA_MODEL` | | `qwen3.5:4b` | Local model (must support tools) |
 | `OLLAMA_FALLBACK_MODELS` | | `gemma4:e4b` | Comma-separated local fallback chain |
 | `OLLAMA_NUM_CTX` / `OLLAMA_NUM_PREDICT` | | `8192` / `1024` | Context window and max tokens per answer |

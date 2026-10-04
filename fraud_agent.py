@@ -20,6 +20,7 @@ import base64
 import json
 import math
 import os
+import re
 import smtplib
 import statistics
 import sys
@@ -34,6 +35,9 @@ from email.message import EmailMessage
 from pathlib import Path
 
 import duckdb
+
+if __name__ == "__main__":
+    sys.modules.setdefault("fraud_agent", sys.modules["__main__"])
 
 
 # ===========================================================================
@@ -66,8 +70,12 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 GEMINI_FALLBACK_MODELS = [m.strip() for m in os.environ.get(
     "GEMINI_FALLBACK_MODELS", os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash")
 ).split(",") if m.strip()]
-# LLM provider: "ollama" (local models) or "gemini" (Google API)
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
+# LLM provider: "anthropic" (Claude API), "ollama" (local models) or "gemini" (Google API)
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic").strip().lower()
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
+ANTHROPIC_FALLBACK_MODELS = [m.strip() for m in os.environ.get(
+    "ANTHROPIC_FALLBACK_MODELS", "claude-haiku-4-5-20251001").split(",") if m.strip()]
+ANTHROPIC_MAX_TOKENS = int(os.environ.get("ANTHROPIC_MAX_TOKENS", "1024"))
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:4b")
 OLLAMA_FALLBACK_MODELS = [m.strip() for m in os.environ.get(
     "OLLAMA_FALLBACK_MODELS", "gemma4:e4b").split(",") if m.strip()]
@@ -75,7 +83,7 @@ OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))       # context w
 OLLAMA_NUM_PREDICT = int(os.environ.get("OLLAMA_NUM_PREDICT", "1024"))  # max tokens per answer
 OLLAMA_THINK = os.environ.get("OLLAMA_THINK", "0") == "1"            # reasoning: slower
 MAX_TOOL_CALLS = 5                 # tool calls per customer message, for every provider
-RETRYABLE_CODES = {500, 503, 504}  # temporary overload: worth retrying the same model
+RETRYABLE_CODES = {500, 503, 504, 529}  # temporary overload: worth retrying the same model
 QUOTA_CODE = 429                   # quota exhausted: retrying wastes time, switch model
 MAX_RETRIES = 3
 
@@ -652,10 +660,15 @@ def send_whatsapp(to: str | None, body: str, template_vars: dict | None = None) 
         return f"error: {e}"
 
 
+GREETING = re.compile(r"^\s*(hola|ol[áa]|buen[oa]s(\s+\w+)?|estimad[oa])\b[^,:.!\n]*[,:.!]?\s*",
+                      re.IGNORECASE)
+
+
 def compose_alert(profile: dict, suspicious: list[dict], message: str) -> str:
     """Customer-facing alert text (Spanish), including an anti-phishing reminder."""
     first = profile.get("first_name") or (profile.get("full_name") or "").split(" ")[0] or "cliente"
-    lines = [f"Hola {first},", "", message.strip(), "", "Transacciones en revisión:"]
+    body = GREETING.sub("", message.strip(), count=1).strip() or message.strip()
+    lines = [f"Hola {first},", "", body[:1].upper() + body[1:], "", "Transacciones en revisión:"]
     for tx in suspicious:
         place = " ".join(x for x in [tx.get("merchant") or tx.get("category"), tx.get("city")] if x)
         card = f" | {tx['card']}" if tx.get("card") else ""
@@ -773,7 +786,8 @@ def build_tools(customer_id: str, profile: dict) -> list:
         Args:
             transaction_ids: IDs of the suspicious transactions to include in the alert.
             channel: Delivery channel: "email", "whatsapp" or "both".
-            message: Short, clear message for the customer in their language, without sensitive data.
+            message: Body of the alert only, 1-2 sentences in the customer's language. No greeting
+                (the template already says "Hola <name>"), no signature, no sensitive data.
         """
         print(f"  [tool] send_fraud_alert({transaction_ids}, channel={channel})", flush=True)
         if not session["suspicious"]:
@@ -785,7 +799,30 @@ def build_tools(customer_id: str, profile: dict) -> list:
         txs = [session["suspicious"][str(i)] for i in transaction_ids]
         return send_alert(profile, txs, channel, message, source="agent")
 
-    return [view_customer_profile, list_transactions, assess_fraud_risk, send_fraud_alert]
+    def escalate_to_agent(conversation_language: str, reason: str, summary: str,
+                          transaction_ids: list[str]) -> dict:
+        """Escalates the conversation to a human service agent who speaks the customer's language.
+        Use it when the customer does not recognize transactions or asks for a person, after
+        they agree.
+
+        Args:
+            conversation_language: Language of THIS conversation: "es", "pt" or "en".
+            reason: Why the customer needs a human (for example: does not recognize a transfer).
+            summary: 2-3 sentence summary for the agent: transactions, amounts, what the customer said.
+            transaction_ids: IDs of the transactions the customer disputes (can be empty).
+        """
+        print(f"  [tool] escalate_to_agent(language={conversation_language})", flush=True)
+        if session.get("escalation", {}).get("escalated"):
+            return {**session["escalation"], "note": "The case was already escalated."}
+        import fraud_flow  # lazy: fraud_flow imports this module
+        fraud_flow.setup_tables()
+        case = fraud_flow.open_chat_case(customer_id, [str(i) for i in transaction_ids], reason)
+        session["escalation"] = fraud_flow.escalate(case, profile, conversation_language,
+                                                    reason, summary)
+        return session["escalation"]
+
+    return [view_customer_profile, list_transactions, assess_fraud_risk, send_fraud_alert,
+            escalate_to_agent]
 
 
 SYSTEM_INSTRUCTIONS = """You are the LATAM Bank security assistant. You are serving the
@@ -797,15 +834,19 @@ Rules:
 - The data is historical: "recent" means relative to the last recorded transaction.
 - Before calling send_fraud_alert, tell the customer which transactions you will include and
   through which channel, and wait for their agreement. Only use IDs flagged by the assessment.
-- If the customer does not recognize a transaction, recommend blocking the card and offer to
-  escalate to a human advisor with a summary (transaction ID, amount, date, reasons).
+- If the customer does not recognize a transaction, recommend blocking the card from the app
+  and offer to escalate to a human agent. If they agree, call escalate_to_agent and tell them
+  the agent's first name.
+- Only offer actions your tools can perform. You cannot block cards: the customer does that in
+  the app or through the bank's official line.
 - Never ask for or reveal passwords, PINs, CVVs or full card numbers.
 - If a question is not about their transactions or security, say so and do not invent data.
 - Customers transact about once or twice a month, so use days=180 by default.
 - Be efficient: call each tool at most once per customer message. If assess_fraud_risk finds
   nothing suspicious, say so clearly and OFFER to review a longer period (365 days); do not
   widen the window on your own.
-- Always reply in the customer's language (Spanish or Portuguese), briefly.
+- Always reply in the customer's language (Spanish or Portuguese), briefly, in plain text
+  (no tables or markdown: the same answers are sent by WhatsApp).
 """
 
 
@@ -966,8 +1007,71 @@ class OllamaClient:
     chats = _OllamaChats()
 
 
+class AnthropicConfig:
+    """System prompt + tools in the Claude API format (reuses the same Python functions)."""
+    def __init__(self, system_instruction: str, tools: list):
+        self.system_instruction = system_instruction
+        self.ollama = OllamaConfig(system_instruction, tools)  # schemas, coercion, execution
+        self.schemas = [{"name": t["function"]["name"],
+                         "description": t["function"]["description"],
+                         "input_schema": t["function"]["parameters"]}
+                        for t in self.ollama.schemas]
+
+    def run_tool(self, name: str, arguments: dict) -> str:
+        return self.ollama.run_tool(name, arguments)
+
+
+class AnthropicChat:
+    """Chat session with Claude. Runs the tool-use loop (stop_reason == "tool_use")."""
+    def __init__(self, client, model: str, config: AnthropicConfig, history: list | None = None):
+        self.client, self.model, self.config = client, model, config
+        self.messages = list(history) if history else []
+
+    def get_history(self) -> list:
+        return list(self.messages)
+
+    def send_message(self, text: str) -> _Reply:
+        import anthropic
+        pending = self.messages + [{"role": "user", "content": text}]
+        for _ in range(MAX_TOOL_CALLS + 1):
+            try:
+                response = self.client.messages.create(
+                    model=self.model, max_tokens=ANTHROPIC_MAX_TOKENS,
+                    system=self.config.system_instruction,
+                    tools=self.config.schemas, messages=pending)
+            except anthropic.APIStatusError as e:
+                code = 503 if e.status_code == 529 else e.status_code  # 529 = overloaded
+                raise LLMError(code, str(e)) from e
+            except anthropic.APIConnectionError as e:
+                raise LLMError(None, f"No hay conexión con la API de Anthropic: {e}") from e
+            pending.append({"role": "assistant", "content": response.content})
+            if response.stop_reason != "tool_use":
+                self.messages = pending  # commit only on success
+                return _Reply("".join(b.text for b in response.content if b.type == "text"))
+            results = [{"type": "tool_result", "tool_use_id": block.id,
+                        "content": self.config.run_tool(block.name, block.input)}
+                       for block in response.content if block.type == "tool_use"]
+            pending.append({"role": "user", "content": results})
+        self.messages = pending
+        return _Reply("Disculpa, no pude completar la consulta. ¿Me lo repites de otra forma?")
+
+
+class _AnthropicChats:
+    def __init__(self, sdk_client):
+        self.sdk_client = sdk_client
+
+    def create(self, model: str, config: AnthropicConfig, history: list | None = None) -> AnthropicChat:
+        return AnthropicChat(self.sdk_client, model, config, history)
+
+
+class AnthropicClient:
+    def __init__(self):
+        import anthropic
+        self.chats = _AnthropicChats(anthropic.Anthropic(max_retries=2))  # reads ANTHROPIC_API_KEY
+
+
 def provider_label() -> str:
-    return "Ollama local" if LLM_PROVIDER == "ollama" else "Gemini"
+    return {"anthropic": "Claude", "ollama": "Ollama local"}.get(LLM_PROVIDER, "Gemini")
 
 
 def create_llm_session(system_instruction: str, tools: list) -> dict:
@@ -976,7 +1080,12 @@ def create_llm_session(system_instruction: str, tools: list) -> dict:
     The client is kept inside the session on purpose (a garbage-collected Gemini client
     closes its HTTP connection: "Cannot send a request, as the client has been closed").
     """
-    if LLM_PROVIDER == "ollama":
+    if LLM_PROVIDER == "anthropic":
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            sys.exit("Falta ANTHROPIC_API_KEY en el .env")
+        client = AnthropicClient()
+        config, model = AnthropicConfig(system_instruction, tools), ANTHROPIC_MODEL
+    elif LLM_PROVIDER == "ollama":
         client, config, model = OllamaClient(), OllamaConfig(system_instruction, tools), OLLAMA_MODEL
     elif LLM_PROVIDER == "gemini":
         from google import genai
@@ -991,7 +1100,7 @@ def create_llm_session(system_instruction: str, tools: list) -> dict:
                 maximum_remote_calls=MAX_TOOL_CALLS))
         model = GEMINI_MODEL
     else:
-        sys.exit(f"LLM_PROVIDER desconocido: {LLM_PROVIDER}. Usa 'ollama' o 'gemini'.")
+        sys.exit(f"LLM_PROVIDER desconocido: {LLM_PROVIDER}. Usa 'anthropic', 'ollama' o 'gemini'.")
     return {"client": client, "config": config, "model": model,
             "chat": client.chats.create(model=model, config=config)}
 
@@ -1033,7 +1142,8 @@ def send_with_retry(client, chat, model: str, config, question: str):
       - then walk the GEMINI_FALLBACK_MODELS chain, keeping the conversation history.
     Returns (reply or None, chat, model in use).
     """
-    fallbacks = OLLAMA_FALLBACK_MODELS if LLM_PROVIDER == "ollama" else GEMINI_FALLBACK_MODELS
+    fallbacks = {"anthropic": ANTHROPIC_FALLBACK_MODELS, "ollama": OLLAMA_FALLBACK_MODELS}.get(
+        LLM_PROVIDER, GEMINI_FALLBACK_MODELS)
     chain = [model] + [m for m in fallbacks if m != model]
     for index, current in enumerate(chain):
         if index > 0:

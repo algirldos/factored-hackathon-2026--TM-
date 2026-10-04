@@ -1,3 +1,4 @@
 duckdb
 ollama
 google-genai
+anthropic
