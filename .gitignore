@@ -34,3 +34,6 @@ demo_recipients.csv
 
 # Configuración local de Claude Code
 .claude/
+
+# Diccionario de datos con credenciales del organizador: solo local
+disclamer/*.pdf
