@@ -2,3 +2,10 @@ duckdb
 ollama
 google-genai
 anthropic
+# Customer clustering model (src/features, src/models)
+pandas>=2.2
+numpy>=1.26
+# Pinned: a saved .joblib model only loads reliably with the version that trained it
+scikit-learn==1.9.1
+joblib
+python-dotenv

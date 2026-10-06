@@ -1,2 +1,0 @@
-{"timestamp": "2026-10-04T17:34:20", "source": "monitor", "customer_id": "CLI-BBYM7NYP9LUO", "demo_mode": true, "transactions": ["TRX-VWEX2VZRC3HFT7HGUZAE"], "scores": [94.2], "results": {"email": "sent", "whatsapp": "disabled (WHATSAPP_ENABLED=0)"}}
-{"timestamp": "2026-10-04T17:48:00", "source": "agent", "customer_id": "CLI-BBYM7NYP9LUO", "demo_mode": true, "transactions": ["TRX-VWEX2VZRC3HFT7HGUZAE"], "scores": [94.2], "results": {"email": "sent"}}

@@ -24,3 +24,13 @@ __pycache__/
 
 # VS Code
 .vscode/
+
+# Datos generados en ejecución (registro de auditoría y destinatarios reales de la demo)
+sent_alerts.jsonl
+demo_recipients.csv
+
+# Pytest
+.pytest_cache/
+
+# Configuración local de Claude Code
+.claude/

@@ -10,6 +10,19 @@ from sklearn.preprocessing import (
 )
 
 
+def _dense_one_hot_encoder():
+    """
+    OneHotEncoder with dense output on any scikit-learn version.
+    The parameter was renamed from `sparse` to `sparse_output` in 1.2
+    and `sparse` was removed in 1.4.
+    """
+
+    try:
+        return OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+    except TypeError:
+        return OneHotEncoder(handle_unknown="ignore", sparse=False)
+
+
 class CustomerPreprocessor:
     """
     Reusable preprocessing pipeline for customer datasets.
@@ -88,10 +101,7 @@ class CustomerPreprocessor:
             steps=[
                 (
                     "one_hot",
-                    OneHotEncoder(
-                        handle_unknown="ignore",
-                        sparse=False
-                    )
+                    _dense_one_hot_encoder()
                 )
             ]
         )
@@ -206,8 +216,9 @@ class TransactionBehaviorPipeline:
         "transaction_country",
         "transaction_city",
         "transaction_status",
-        "is_fraud",
     ]
+    # is_fraud is not required: it is the evaluation label and does not
+    # exist for new transactions in production.
 
     def __init__(
         self,

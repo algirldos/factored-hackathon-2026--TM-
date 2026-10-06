@@ -36,6 +36,8 @@ from pathlib import Path
 
 import duckdb
 
+import policy
+
 if __name__ == "__main__":
     sys.modules.setdefault("fraud_agent", sys.modules["__main__"])
 
@@ -821,8 +823,10 @@ def build_tools(customer_id: str, profile: dict) -> list:
                                                     reason, summary)
         return session["escalation"]
 
-    return [view_customer_profile, list_transactions, assess_fraud_risk, send_fraud_alert,
-            escalate_to_agent]
+    # The console chat is opened by an operator for a known customer, so the session counts
+    # as verified; the OTP-gated customer flow lives in fraud_flow.build_flow_tools.
+    return policy.enforce([view_customer_profile, list_transactions, assess_fraud_risk,
+                           send_fraud_alert, escalate_to_agent], is_verified=lambda: True)
 
 
 SYSTEM_INSTRUCTIONS = """You are the LATAM Bank security assistant. You are serving the

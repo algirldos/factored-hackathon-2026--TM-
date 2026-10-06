@@ -41,6 +41,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
 import fraud_agent as fa  # reuses connection, data access, risk engine and delivery
+import policy
 
 # ===========================================================================
 # 1. Configuration
@@ -581,8 +582,7 @@ def build_flow_tools(case: dict, profile: dict) -> list:
     # Session state. Gemini calls can be retried (e.g. after a 503), which re-runs the tools,
     # so every tool with side effects must be idempotent within the session.
     state = {"verified": False, "last_resend": None, "escalation": None}
-    not_verified = {"error": "Identity not verified yet. Ask for the 6-digit code sent by email "
-                             "and call verify_otp. Do not share any account information."}
+    # The OTP gate for data tools is enforced by policy.enforce (see policy.TOOL_POLICY).
 
     def verify_otp(code: str) -> dict:
         """Verifies the 6-digit one-time code the customer received by email.
@@ -614,8 +614,6 @@ def build_flow_tools(case: dict, profile: dict) -> list:
     def get_case_details() -> dict:
         """Returns the unusual transactions of this case with their risk score and reasons. Requires verify_otp first."""
         print("  [tool] get_case_details()", flush=True)
-        if not state["verified"]:
-            return not_verified
         txs = case_transactions(case)
         return {"case_id": case["case_id"],
                 "flagged_by": "anomaly detection model" if case.get("source") == "anomaly_model"
@@ -631,8 +629,6 @@ def build_flow_tools(case: dict, profile: dict) -> list:
             limit: Maximum number of transactions (for example 10).
         """
         print(f"  [tool] list_recent_transactions(days={days}, limit={limit})", flush=True)
-        if not state["verified"]:
-            return not_verified
         txs = fa.load_transactions([case["customer_id"]]).get(case["customer_id"], [])
         if not txs:
             return {"transactions": []}
@@ -649,8 +645,6 @@ def build_flow_tools(case: dict, profile: dict) -> list:
             comment: Short summary of what the customer said.
         """
         print(f"  [tool] record_customer_response({recognizes_transactions})", flush=True)
-        if not state["verified"]:
-            return not_verified
         status = ST_LEGIT if recognizes_transactions else ST_FRAUD
         update_case(case["case_id"], status, comment[:500])
         return {"recorded": True, "case_status": status}
@@ -665,15 +659,14 @@ def build_flow_tools(case: dict, profile: dict) -> list:
             summary: 2-3 sentence summary for the agent: transactions, amounts, what the customer said.
         """
         print(f"  [tool] escalate_to_agent(language={conversation_language})", flush=True)
-        if not state["verified"]:
-            return not_verified
         if state["escalation"] and state["escalation"].get("escalated"):
             return {**state["escalation"], "note": "The case was already escalated."}
         state["escalation"] = escalate(case, profile, conversation_language, reason, summary)
         return state["escalation"]
 
-    return [verify_otp, resend_otp, get_case_details, list_recent_transactions,
-            record_customer_response, escalate_to_agent]
+    return policy.enforce([verify_otp, resend_otp, get_case_details, list_recent_transactions,
+                           record_customer_response, escalate_to_agent],
+                          is_verified=lambda: state["verified"])
 
 
 FLOW_INSTRUCTIONS = """You are LATAM Bank's fraud-prevention assistant on WhatsApp, handling case

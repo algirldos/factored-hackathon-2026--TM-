@@ -1,15 +1,23 @@
-# LATAM Bank Fraud Agent
+# LATAM Bank Card Support Agent
 
-An AI agent that detects suspicious card transactions and alerts customers by email or WhatsApp.
-Built for the **Factored AI & Data Hackathon 2026** on top of the synthetic LATAM Bank dataset.
+An AI-first customer-service agent for **card support**: it reviews a customer's card activity,
+explains suspicious or unrecognized charges, alerts the customer and hands the case to a human
+when needed. Built for the **Factored AI & Data Hackathon 2026** on top of the synthetic
+LATAM Bank dataset.
 
+- **Workflow:** Card Support, one of the four workflows proposed by the challenge. Account
+  inquiries, transaction disputes and credit products are out of scope: the agent abstains and
+  offers a human instead.
 - **Data:** MotherDuck (`latam_bank` database, `bronze` layer)
-- **LLM:** Claude (Anthropic API), local models via Ollama, or Google Gemini (tool calling)
-- **Alerts:** SMTP email and WhatsApp (Twilio)
+- **LLM:** Claude (Anthropic API) by default; local models via Ollama or Google Gemini as alternatives
+- **Channels:** web chat (prototype), WhatsApp (Twilio) and email (SMTP)
 
-The agent talks to an authenticated customer, reviews their transactions, explains why a
-transaction looks risky, and, with the customer's agreement and a human operator's approval,
-sends an alert.
+The agent talks to a customer whose identity is verified with a one-time code, reviews their card
+transactions, explains why a transaction looks risky, and, with the customer's agreement and a
+human operator's approval, sends an alert or escalates to a service agent.
+
+> **Status.** Card actions (lock, unlock, report lost or stolen) and Portuguese templates are not
+> implemented yet. See [Limitations](#limitations).
 
 ---
 
@@ -25,11 +33,13 @@ sends an alert.
 8. [Usage](#usage)
 9. [Setting up real alerts](#setting-up-real-alerts)
 10. [Evaluation](#evaluation)
-11. [Audit log](#audit-log)
-12. [Column mapping](#column-mapping)
-13. [Limitations](#limitations)
-14. [Project structure](#project-structure)
-15. [Troubleshooting](#troubleshooting)
+11. [Customer clustering model](#customer-clustering-model)
+12. [Tests](#tests)
+13. [Audit log](#audit-log)
+14. [Column mapping](#column-mapping)
+15. [Limitations](#limitations)
+16. [Project structure](#project-structure)
+17. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -37,8 +47,10 @@ sends an alert.
 
 ```mermaid
 flowchart LR
-    C[Customer] <-->|chat| G[Gemini]
-    G -->|function calls| T[Agent tools<br/>scoped to one customer]
+    C[Customer] <-->|chat| G[LLM<br/>Claude by default]
+    G -->|tool calls| P{Policy layer<br/>policy.py}
+    P -->|allowed| T[Agent tools<br/>scoped to one customer]
+    P -.->|denied| G
     T -->|SQL| M[(MotherDuck<br/>latam_bank.bronze)]
     T --> R[Risk engine<br/>rules + fraud_score]
     T -->|human approval| A[Alert dispatcher]
@@ -47,32 +59,35 @@ flowchart LR
     A --> L[(sent_alerts.jsonl<br/>audit log)]
 ```
 
-Key design choice: **Gemini never decides the risk.** The score is computed by deterministic,
-explainable code. Gemini only chooses which tool to call and explains the results to the
-customer in their language.
+Key design choices:
+
+- **The LLM never decides the risk.** The score is computed by deterministic, explainable code.
+  The model only chooses which tool to call and explains the results in the customer's language.
+- **The LLM never decides what it is allowed to do.** Every tool call goes through `policy.py`,
+  which checks the tool's permissions in code before it runs (see [Safety controls](#safety-controls)).
 
 ### Typical conversation
 
 ```mermaid
 sequenceDiagram
     actor Customer
-    participant Gemini
+    participant LLM
     participant Tools
     participant MotherDuck
     actor Operator
 
-    Customer->>Gemini: "I see a charge I don't recognize"
-    Gemini->>Tools: assess_fraud_risk(days=30)
+    Customer->>LLM: "I see a charge I don't recognize"
+    LLM->>Tools: assess_fraud_risk(days=30)
     Tools->>MotherDuck: customer's transactions (deduplicated)
     MotherDuck-->>Tools: rows
-    Tools-->>Gemini: suspicious transactions + scores + reasons
-    Gemini-->>Customer: explanation, proposes an alert
-    Customer->>Gemini: "Yes, send it by WhatsApp"
-    Gemini->>Tools: send_fraud_alert([ids], "whatsapp", message)
+    Tools-->>LLM: suspicious transactions + scores + reasons
+    LLM-->>Customer: explanation, proposes an alert
+    Customer->>LLM: "Yes, send it by WhatsApp"
+    LLM->>Tools: send_fraud_alert([ids], "whatsapp", message)
     Tools->>Operator: preview, approve? (y/n)
     Operator-->>Tools: approve
-    Tools-->>Gemini: sent
-    Gemini-->>Customer: confirmation + next steps
+    Tools-->>LLM: sent
+    LLM-->>Customer: confirmation + next steps
 ```
 
 ---
@@ -119,8 +134,9 @@ All thresholds and weights are constants at the top of `fraud_agent.py`
 
 ## Agent tools
 
-Gemini can call these four functions. None of them takes a customer ID: they are bound to the
-customer of the session when the chat starts.
+The model can call these five functions in the console chat (`fraud_agent.py`). None of them
+takes a customer ID: they are bound to the customer of the session when the chat starts. Every
+tool must be registered in `policy.TOOL_POLICY`; an unregistered tool is rejected at startup.
 
 | Tool | Purpose | Returns |
 |------|---------|---------|
@@ -128,6 +144,7 @@ customer of the session when the chat starts.
 | `list_transactions(days, limit)` | Recent activity | Newest-first transactions, without risk data |
 | `assess_fraud_risk(days)` | Risk assessment | Suspicious transactions with score, level, reasons and card (e.g. `Credit Card ****1234`) |
 | `send_fraud_alert(transaction_ids, channel, message)` | Alert the customer | Delivery result per channel |
+| `escalate_to_agent(conversation_language, reason, summary, transaction_ids)` | Hand off to a human | Assigned agent and routing explanation |
 
 `days` is counted back from the customer's **last recorded transaction**, not from today,
 because the dataset is historical (it ends in June 2026).
@@ -171,7 +188,7 @@ Setup: install Ollama (ollama.com/download), then `ollama pull qwen3.5:4b` and
   model) switches immediately to the next model, since waiting seconds would not help.
 - **Fallback chain:** `GEMINI_FALLBACK_MODELS` lists models to try in order, keeping the
   conversation history. Each model has its own free-tier quota.
-- **Idempotent tools:** a retried Gemini turn re-runs its tool calls, so tools with side effects
+- **Idempotent tools:** a retried LLM turn re-runs its tool calls, so tools with side effects
   (verify OTP, resend OTP, escalate) never repeat or undo their effect within a session.
 - **Tool-call cap:** at most 5 tool calls per customer message, and the system prompt asks the
   model to call each tool once and offer a longer window instead of widening it on its own.
@@ -182,6 +199,7 @@ Setup: install Ollama (ollama.com/download), then `ollama pull qwen3.5:4b` and
 
 | Control | What it prevents |
 |---------|------------------|
+| Permission table in code (`policy.py`) | The LLM running a data tool before identity is verified; tools not in the table never run |
 | Tools scoped to the session's customer | A prompt injection cannot make the agent read another customer's data |
 | Risk computed in code, not by the LLM | Invented or inconsistent risk levels |
 | `send_fraud_alert` only accepts IDs flagged by the last `assess_fraud_risk` | Alerts about arbitrary transactions |
@@ -206,7 +224,7 @@ sequenceDiagram
     participant Flow as fraud_flow.py
     participant DB as MotherDuck (latam_bank.fraud_ops)
     actor Customer
-    participant Gemini
+    participant LLM
     actor Agent as Service agent
 
     Model->>Flow: anomaly for customer X (transaction IDs)
@@ -214,17 +232,17 @@ sequenceDiagram
     Flow->>DB: INSERT otp_codes (HMAC hash, expires in 10 min)
     Flow->>Customer: email with the 6-digit code
     Flow->>Customer: WhatsApp: "verify your identity with the code"
-    Customer->>Gemini: 123456
-    Gemini->>Flow: verify_otp("123456")
+    Customer->>LLM: 123456
+    LLM->>Flow: verify_otp("123456")
     Flow->>DB: compare hash, check expiry and attempts
-    Flow-->>Gemini: verified = true (data tools unlocked)
-    Gemini->>Flow: get_case_details()
-    Gemini-->>Customer: explains the unusual transactions
-    Customer->>Gemini: "That wasn't me, I want to talk to someone"
-    Gemini->>Flow: record_customer_response(false), escalate_to_agent("es", ...)
+    Flow-->>LLM: verified = true (data tools unlocked)
+    LLM->>Flow: get_case_details()
+    LLM-->>Customer: explains the unusual transactions
+    Customer->>LLM: "That wasn't me, I want to talk to someone"
+    LLM->>Flow: record_customer_response(false), escalate_to_agent("es", ...)
     Flow->>DB: rank service_agents, INSERT escalations
     Flow->>Agent: case notification (email)
-    Gemini-->>Customer: "Luz, our fraud specialist, will contact you"
+    LLM-->>Customer: "Luz, our fraud specialist, will contact you"
 ```
 
 ### Commands
@@ -271,8 +289,6 @@ Every case records `source = anomaly_model` and the model's `anomaly_score`.
 In demo mode every WhatsApp goes to the same test number, so after a batch, talk to a specific
 case with `--chat CASE_ID`.
 
-In VS Code the same commands are available as **Flow · ...** run configurations.
-
 ### Tables written to `latam_bank`
 
 `fraud_flow.py` needs a MotherDuck token with **write** access. Tables are created on the first
@@ -297,7 +313,7 @@ Case status: `otp_sent` → `verified` → `customer_confirmed_legit` / `custome
 | Attempt limit | 3 wrong attempts lock the code |
 | Resend limit | At most 3 codes per case |
 | One active code | Requesting a new code invalidates the previous one (`superseded`) |
-| Enforced in code | Until `verify_otp` succeeds, every data tool returns an error, whatever the LLM tries |
+| Enforced in code | Until `verify_otp` succeeds, every data tool returns an error, whatever the LLM tries (`policy.enforce`) |
 | Not logged | The console shows `verify_otp(******)` |
 | Anti-phishing opener | The first WhatsApp message reveals no account data and states the bank never asks for passwords |
 
@@ -366,9 +382,6 @@ Channel switches, independent from the credentials:
 At startup both scripts print the delivery status, for example:
 `Modo DEMO | correo: activo | WhatsApp: desactivado | 2 destinos por cliente en demo_recipients.csv`.
 
-In VS Code, **Flow · demo: open case with my email/WhatsApp** asks for the customer, email and
-phone number.
-
 ### WhatsApp templates (Twilio error 21654)
 
 Some Twilio WhatsApp senders (for example the trial sender assigned by the new Console) only accept
@@ -386,7 +399,7 @@ Some Twilio WhatsApp senders (for example the trial sender assigned by the new C
    ```
 
    Available fields: `first_name`, `email` (masked), `case_id`, `bank`.
-3. Check it with **Flow · test WhatsApp (Twilio)** (`python fraud_flow.py --test-whatsapp +57...`),
+3. Check it with `python fraud_flow.py --test-whatsapp +57...`,
    which sends a test opener and prints Twilio's exact answer without touching the database.
 
 Only the opener uses the template. Replies inside the conversation are free text, which WhatsApp
@@ -407,7 +420,7 @@ The console simulator is enough for the demo. To use a real phone:
 6. Open a case with `--trigger <customer> --no-chat`. The OTP arrives by email and the opener by
    WhatsApp; reply from your phone.
 
-The server answers Twilio immediately and sends the reply through the REST API, because a Gemini
+The server answers Twilio immediately and sends the reply through the REST API, because an LLM
 turn with tools can exceed Twilio's 15-second webhook timeout. Incoming messages are matched to
 the most recent open case of that phone number.
 
@@ -419,21 +432,25 @@ the most recent open case of that phone number.
 
 - Python 3.10+
 - A MotherDuck account with the `latam_bank` database loaded
-- A Gemini API key ([Google AI Studio](https://aistudio.google.com/))
+- An Anthropic API key ([Claude Console](https://console.anthropic.com/)), or Ollama / a Gemini
+  API key if you change `LLM_PROVIDER`
 - Optional: Gmail account and/or Twilio account for real alerts
 
 ### Install
 
 ```bash
-git clone <repo-url>
-cd <repo>/src/agente-motherduck
+git clone https://github.com/algirldos/factored-hackathon-2026--TM-.git
+cd factored-hackathon-2026--TM-
 
 python -m venv .venv
 # Windows
-.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m pip install -r requirements-dev.txt
 # Linux / macOS
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements-dev.txt
 ```
+
+`requirements-dev.txt` installs `requirements.txt` plus `pytest`. Use `requirements.txt` alone
+on a server that does not run the tests.
 
 ### Configure
 
@@ -441,8 +458,8 @@ python -m venv .venv
 cp .env.example .env      # Windows: copy .env.example .env
 ```
 
-Fill in at least `MOTHERDUCK_TOKEN` and `GEMINI_API_KEY`. The script loads `.env`
-automatically, both from VS Code and from the terminal.
+Fill in at least `MOTHERDUCK_TOKEN` and `ANTHROPIC_API_KEY` (plus `OTP_SECRET` for the
+verified flow). The scripts load `.env` automatically. Never commit `.env`: it is in `.gitignore`.
 
 ### First run
 
@@ -515,15 +532,17 @@ logged, but nothing is delivered. That is enough for a demo.
 Options: `--days N` (analysis window, default 180) and `--channel email|whatsapp|both`
 (for `--monitor`, default `both`).
 
-### VS Code
+### Web chat (prototype)
 
-Open the folder in VS Code and use **Run and Debug** (`Ctrl+Shift+D`):
+`src/web/chat.html` is the customer-facing chat window: tool name, conversation history and
+message box. It is a static page that still answers with **simulated** replies; it will call the
+agent through an HTTP API in the next phase. To open it:
 
-- **Fraud · chat with customer** (asks for the customer ID)
-- **Fraud · demo customers**
-- **Fraud · monitor customer** (asks for the customer ID)
-- **Fraud · evaluate rules**
-- **Fraud · show columns**
+```bash
+python -m http.server 5178 --directory src/web
+```
+
+Then open `http://localhost:5178/chat.html`.
 
 ### Example session
 
@@ -586,6 +605,79 @@ Recall is not affected by the balancing.
 
 ---
 
+## Customer clustering model
+
+A second, learned risk signal: customers are grouped by profile with K-means, and a customer's
+last 30 days of activity are compared with the usual behavior of their group. Its output is
+**per customer and per metric**, not per transaction.
+
+The logic of `notebooks/01_eda.ipynb` (sections 1 and 2) and
+`notebooks/03_clustering_refactored.ipynb` now lives in importable modules, so training, batch
+scoring and the agent share the same code. The notebooks remain for exploration.
+
+| Module | Notebook origin | What it does |
+|--------|-----------------|--------------|
+| `src/features/sources.py` | `bank_reader.py` | Reads customers, products, transactions and exchange rates from MotherDuck; filters and deduplicates in SQL |
+| `src/features/currency.py` | `01_eda` §1 | Country to currency mapping and USD rates from `bronze.daily_exchange_rates` |
+| `src/features/customer_features.py` | `01_eda` §1-2 | One row per eligible customer: balances per product, debt, assets, age |
+| `src/models/customer_clustering.py` | `03` §2-10, 21-23 | Preprocessor, PCA and K-means: fit, save, load and assign clusters |
+| `src/features/transaction_behavior.py` | `03` §12-18 | Baseline (12 months) and recent (30 days) windows and the behavior metrics |
+| `src/models/behavior_scoring.py` | `03` §19-26 | Robust profile per cluster and deviation per metric; a metric is suspicious at ≥ 3 robust standard deviations |
+
+Differences from the notebooks, made so results are reproducible:
+
+- Everything is computed at an explicit `as_of` date: age, windows and exchange rates. The
+  notebooks used today's date and the latest timestamp in the data (with its time of day).
+- USD amounts use the daily rates of `as_of`, not the fixed rates of `currency_config.json`.
+- Duplicate rows of the bronze layer are removed (customers and products by `last_updated`,
+  transactions by `transaction_id`), so balances and amounts are not counted twice.
+- Every product column exists even when scoring a single customer.
+- `is_fraud` is no longer a required input: it is the evaluation label only.
+
+**Status of the saved artifacts.** `models/customer_clustering/customer_cluster_model.joblib`
+was trained with scikit-learn 1.1.3 and does not load with the pinned version (1.9.1); it must
+be retrained with the new modules (stage 3 of the production plan). The cluster profiles file
+loads, but was built with the notebook's windows.
+
+**Known caveat.** Profiles are built from 12-month averages, while scoring uses 30 days with
+fewer transactions, so recent metrics are noisier and can look unusual more often than they
+are. The threshold must be set with the held-out evaluation, not assumed.
+
+---
+
+## Tests
+
+```bash
+# Windows
+.venv\Scripts\python -m pytest
+# Linux / macOS
+.venv/bin/python -m pytest
+```
+
+The suite runs offline in a few seconds: MotherDuck is replaced by an in-memory DuckDB with the
+bronze schema and synthetic data (`test/factories.py`), and the OTP table and LLM APIs by fakes
+(`test/conftest.py`), so no `.env` or credentials are needed.
+
+| File | What it checks |
+|------|----------------|
+| `test/test_policy.py` | The permission table: unregistered tools are rejected, gated tools stay blocked until the session is verified, wrappers keep each tool's name, signature and docstring |
+| `test/test_agent_tools.py` | The real tools of both entry points: data tools blocked without OTP, a wrong code keeps them blocked, the right code unlocks them, a retried call never undoes verification, the gate holds through the Claude/Ollama tool loop and Gemini accepts the guarded tools |
+| `test/test_privacy.py` | Email and phone masking, the profile tool never exposes full contact data, risk-level thresholds |
+| `test/test_currency.py` | Exchange-rate direction (direct and inverted quotes), country name normalization |
+| `test/test_customer_features.py` | Age at `as_of`, USD conversion, product columns for a single customer, exclusion of ineligible customers |
+| `test/test_transaction_behavior.py` | Non-overlapping half-open windows, deduplication, metrics without `is_fraud`, monthly normalization |
+| `test/test_customer_clustering.py` | Deterministic fit, save/load round trip, unseen categories, missing columns |
+| `test/test_behavior_scoring.py` | Robust deviation (MAD, IQR fallback, zero spread), cluster profiles, suspicious metrics |
+| `test/test_sources.py` | SQL readers on an in-memory DuckDB with the bronze schema, and the full flow from the database to a flagged customer |
+
+Add a test to `test/` with every new tool, and register the tool in `policy.TOOL_POLICY`:
+`test_every_tool_is_registered` fails otherwise.
+
+The tests do not cover the risk rules or the clustering model against real data, nor the web
+chat; `--evaluate` and a manual run cover those for now.
+
+---
+
 ## Audit log
 
 Every alert attempt (sent, simulated or failed) is appended to `sent_alerts.jsonl`:
@@ -632,33 +724,51 @@ add that name at the **start** of the corresponding candidate list.
   behaves as if "now" were that moment.
 - **Missing USD amounts.** `amount_usd` is nullable (~5% nulls in the dataset); those transactions
   are skipped by the amount rule. `daily_exchange_rates` could be used to fill them.
-- **No card blocking.** The agent recommends blocking the card and escalating, but cannot execute
-  the block itself.
-- **Portuguese.** Gemini replies in Portuguese, but alert templates and rule reasons are in Spanish,
-  and the dataset has no Portuguese conversations to test with.
+- **No card actions yet.** Card Support needs lock, unlock and report lost/stolen; today the
+  agent only recommends blocking the card and escalates.
+- **Web chat not connected.** `src/web/chat.html` uses simulated replies until the HTTP API exists.
+- **Portuguese.** The LLM replies in Portuguese, but alert templates and rule reasons are in Spanish,
+  and the dataset has no Portuguese conversations to test with. Portuguese is a challenge requirement.
+- **Evaluation.** `--evaluate` compares rules with `fraud_score` on a balanced sample; there is no
+  held-out scenario set, prompt-injection test set or cost-per-resolution metric yet.
+- **Clustering model not connected.** The modules are ready and tested, but the saved model must
+  be retrained (scikit-learn version) and its scores are not yet written to `fraud_ops` nor
+  used by the agent.
 - **Compute budget.** `--demo-customers` and `--evaluate` scan the full transactions table. On the
   MotherDuck Lite plan, run them sparingly.
-- **Data privacy.** Transaction data sent to Gemini leaves the bank's environment. The free tier
-  of the Gemini API may use content to improve Google's products.
+- **Data privacy.** Transaction data sent to a hosted LLM (Claude or Gemini) leaves the bank's
+  environment. The free tier of the Gemini API may use content to improve Google's products;
+  Ollama keeps data on the machine.
 
 ---
 
 ## Project structure
 
 ```text
-agente-motherduck/
-├── fraud_agent.py       # Risk engine, data access, alert delivery, customer chat
-├── fraud_flow.py        # OTP-verified WhatsApp flow and agent routing
-├── anomalies.example.csv # Example input from the anomaly model
+factored-hackathon-2026--TM-/
+├── fraud_agent.py              # Risk engine, data access, alert delivery, console chat
+├── fraud_flow.py               # OTP-verified WhatsApp flow and agent routing
+├── policy.py                   # Tool permissions enforced in code (OTP gate, deny by default)
+├── motherduck_ia.py            # Natural-language SQL assistant (Ollama, Gemini, MotherDuck AI)
+├── anomalies.example.csv       # Example input from the anomaly model
 ├── demo_recipients.example.csv # Demo recipient per customer (copy to demo_recipients.csv)
-├── motherduck_ia.py     # General natural-language SQL assistant (Ollama, Gemini, MotherDuck AI)
-├── requirements.txt     # duckdb, ollama, google-genai
-├── .env.example         # Configuration template (copy to .env)
-├── .gitignore           # Excludes .env, .venv, logs
+├── requirements.txt            # Agent and model dependencies (scikit-learn pinned)
+├── requirements-dev.txt        # requirements.txt + pytest
+├── pytest.ini                  # Test settings (runs test/)
+├── test/                       # Offline test suite (see Tests)
+├── .env.example                # Configuration template (copy to .env)
+├── .gitignore                  # Excludes .env, .venv, logs, audit log, demo recipients
 ├── README.md
-└── .vscode/
-    ├── launch.json      # Run configurations
-    └── settings.json
+├── disclamer/                  # LATAM Bank data dictionary (PDF)
+├── models/                     # Saved clustering model and cluster profiles (.joblib)
+├── notebooks/                  # EDA, PCA and clustering exploration
+└── src/
+    ├── config/                 # Connection settings and currency mapping
+    ├── database/               # MotherDuck readers, schema notes and column list
+    ├── features/               # Customer features, transaction behavior, SQL sources
+    ├── models/                 # Customer clustering and behavior anomaly scoring
+    ├── preprocessing/          # scikit-learn preprocessing pipelines
+    └── web/chat.html           # Customer chat window (prototype, simulated replies)
 ```
 
 `motherduck_ia.py` is an exploratory tool for asking free-form questions about any table, with
@@ -670,11 +780,13 @@ local models (Ollama), Gemini or MotherDuck's built-in AI. Run `python motherduc
 
 | Symptom | Cause and fix |
 |---------|---------------|
-| `Falta MOTHERDUCK_TOKEN` / `Falta GEMINI_API_KEY` | `.env` missing or misnamed; it must be called exactly `.env` |
+| `Falta MOTHERDUCK_TOKEN` / `Falta ANTHROPIC_API_KEY` | `.env` missing or misnamed; it must be called exactly `.env` |
 | `No encontré la tabla bronze.transactions` | Wrong `MOTHERDUCK_DB` or `TRANSACTIONS_TABLE` |
 | `Faltan columnas obligatorias` | Add the real column names to `TX_COLUMN_CANDIDATES` |
-| `ModuleNotFoundError: No module named 'google'` | VS Code is using another interpreter: select `.venv` with *Python: Select Interpreter* |
-| Gemini model error | Set `GEMINI_MODEL` to another available model (the error message suggests one) |
+| `ModuleNotFoundError` (`duckdb`, `anthropic`, `google`, `pytest`) | The active interpreter is not the project's `.venv`; activate it or install `requirements-dev.txt` |
+| Model error | Set `ANTHROPIC_MODEL` (or `GEMINI_MODEL` / `OLLAMA_MODEL`) to another available model |
+| `[policy] ... bloqueada` in the console | A data tool was called before the OTP was verified; expected behavior |
+| `Tools without a policy in policy.TOOL_POLICY` | A new tool was added without registering its permissions in `policy.py` |
 | Alerts say `simulated` | SMTP/Twilio settings or `TEST_ALERT_*` recipients are missing |
 | Email `error: ... Username and Password not accepted` | Use a Gmail App Password, not your normal password |
 | WhatsApp error 63015 or similar | Your phone has not joined the Twilio sandbox yet |
