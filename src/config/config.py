@@ -8,16 +8,11 @@ from dotenv import load_dotenv
 # Rutas
 # ============================================================
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parents[2]
 
-ENV_PATH = BASE_DIR / "config" / ".env"
+# Load .env from project root
+load_dotenv(BASE_DIR / ".env")
 
-
-# ============================================================
-# Cargar variables de entorno
-# ============================================================
-
-load_dotenv(ENV_PATH)
 
 
 # ============================================================
@@ -37,7 +32,7 @@ class MotherDuckConfig:
 
         if not cls.TOKEN:
             raise ValueError(
-                f"No se encontró MOTHERDUCK_TOKEN en:\n{ENV_PATH}"
+                f"No se encontró MOTHERDUCK_TOKEN en el archivo .env en {BASE_DIR}"
             )
 
         if cls.TOKEN.count(".") != 2:
@@ -46,6 +41,26 @@ class MotherDuckConfig:
             )
 
 
+class PathsConfig:
+
+    BASE_DIR = BASE_DIR
+
+    _clean_data_path = os.getenv("CLEAN_DATA_PATH")
+
+    if _clean_data_path:
+        CLEAN_DATA_PATH = BASE_DIR / Path(_clean_data_path)
+    else:
+        CLEAN_DATA_PATH = (
+            BASE_DIR
+            / "src"
+            / "data"
+            / "processed"
+            / "reduced_users_df.csv"
+        )
+
+    @classmethod
+    def ensure_dirs(cls):
+        cls.CLEAN_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
 # ============================================================
 # Configuración del proyecto
 # ============================================================
