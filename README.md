@@ -663,6 +663,55 @@ To evaluate without leakage, train at a date and score a later period (stage 6 o
 Customer and product tables are monthly snapshots without history, so customer attributes
 are the latest available, not the ones at `--as-of`.
 
+### Batch scoring
+
+```bash
+python score_customers.py --as-of 2026-06-17 --dry-run   # compute and print, write nothing
+python score_customers.py --as-of 2026-06-17             # write fraud_ops + enqueue
+```
+
+Assigns every eligible customer to a cluster, computes the behavior of the 30 days that end
+on `--as-of` and compares it with the profile of the cluster. Only these metrics decide
+whether a customer is suspicious (`SUSPICIOUS_FEATURES` in `src/models/behavior_scoring.py`):
+
+| Metric | Meaning |
+|--------|---------|
+| `num_transacciones_monthly` | Transactions per 30 days |
+| `monto_total_usd_monthly` | Amount spent per 30 days (USD) |
+| `monto_promedio_usd` | Average transaction amount |
+| `monto_mediano_usd` | Median transaction amount |
+| `monto_maximo_usd` | Largest transaction |
+
+A metric is suspicious when it is at least 3 robust standard deviations from the cluster's
+median. A customer goes to the queue when **`--min-suspicious`** of the 5 metrics are
+suspicious (default 4).
+
+Tables written in `fraud_ops` (the token needs write access; `--dry-run` uses a read-only
+connection):
+
+| Table | One row per | Content |
+|-------|-------------|---------|
+| `customer_cluster` | customer | Assigned cluster |
+| `behavior_anomalies` | customer and metric | Value, cluster median and p25/p75, deviation, suspicious or not |
+| `customer_anomaly` | scored customer | Mean deviation, number and list of suspicious metrics |
+| `scoring_runs` | run | Counts, threshold, metrics and status |
+| `anomaly_queue` | flagged customer | Input of `fraud_flow.py --process-queue`; `anomaly_score` = suspicious metrics / 5 |
+
+Every table is keyed by `as_of` + `model_version` and written in one transaction: repeating a
+run replaces its rows, and a customer is enqueued at most once per run date and model, even
+after the case was opened. Enqueuing does not contact anyone: cases (and OTP messages) start
+only when `fraud_flow.py --process-queue` runs, 50 customers at a time.
+
+On the real data (`--as-of 2026-06-17`), 39,572 customers had activity in the last 30 days:
+
+| Suspicious metrics | 0 | 1 | 2 | 3 | 4 | 5 |
+|--------------------|---|---|---|---|---|---|
+| Customers | 22,072 | 8,516 | 4,100 | 4,589 | 268 | 27 |
+
+With the default threshold, 295 customers (0.7%) are enqueued. Against `is_fraud` (only for
+reference; the model never uses it) precision is 0.7% and recall 3% at that threshold, so the
+threshold and the method must be revisited in the evaluation stage.
+
 ### Data contracts
 
 Every step checks its input and output against a contract in `src/contracts.py`: required
@@ -721,6 +770,7 @@ bronze schema and synthetic data (`test/factories.py`), and the OTP table and LL
 | `test/test_behavior_scoring.py` | Robust deviation (MAD, IQR fallback, zero spread), cluster profiles, suspicious metrics |
 | `test/test_sources.py` | SQL readers on an in-memory DuckDB with the bronze schema, and the full flow from the database to a flagged customer |
 | `test/test_training.py` | Training metadata, notebook-compatible profiles, determinism, no data after `as_of`, save/load round trip, refusal of another scikit-learn version, and the CLI |
+| `test/test_batch_scoring.py` | Only the 5 chosen metrics are scored, a customer whose spending jumps is enqueued, dry runs write nothing, every `fraud_ops` table is written with consistent counts, repeated runs never enqueue twice, and the CLI uses read-only vs write connections |
 | `test/test_contracts.py` | Each contract rule is detected and named, drop vs raise modes, the 5% limit, and that every pipeline step enforces its contract |
 
 Add a test to `test/` with every new tool, and register the tool in `policy.TOOL_POLICY`:
@@ -784,8 +834,10 @@ add that name at the **start** of the corresponding candidate list.
   and the dataset has no Portuguese conversations to test with. Portuguese is a challenge requirement.
 - **Evaluation.** `--evaluate` compares rules with `fraud_score` on a balanced sample; there is no
   held-out scenario set, prompt-injection test set or cost-per-resolution metric yet.
-- **Clustering model not connected.** Training is ready and tested, but it has not been run on
-  the real data yet, and the scores are not written to `fraud_ops` nor used by the agent.
+- **Clustering model not used by the agent yet.** The model is trained on the real data and
+  batch scoring writes `fraud_ops`, but the agent's tools do not read those results yet.
+- **Weak clustering signal.** With the default threshold, precision against `is_fraud` is 0.7%
+  and recall 3% (see Batch scoring). The 30-day window is noisier than the 12-month profile.
 - **Compute budget.** `--demo-customers` and `--evaluate` scan the full transactions table. On the
   MotherDuck Lite plan, run them sparingly.
 - **Data privacy.** Transaction data sent to a hosted LLM (Claude or Gemini) leaves the bank's
@@ -802,6 +854,7 @@ factored-hackathon-2026--TM-/
 ├── fraud_flow.py               # OTP-verified WhatsApp flow and agent routing
 ├── policy.py                   # Tool permissions enforced in code (OTP gate, deny by default)
 ├── train_clusters.py           # Trains the clustering model and profiles (see Training)
+├── score_customers.py          # Scores the last 30 days and writes fraud_ops (see Batch scoring)
 ├── motherduck_ia.py            # Natural-language SQL assistant (Ollama, Gemini, MotherDuck AI)
 ├── anomalies.example.csv       # Example input from the anomaly model
 ├── demo_recipients.example.csv # Demo recipient per customer (copy to demo_recipients.csv)
@@ -839,6 +892,7 @@ local models (Ollama), Gemini or MotherDuck's built-in AI. Run `python motherduc
 | `Faltan columnas obligatorias` | Add the real column names to `TX_COLUMN_CANDIDATES` |
 | `ModuleNotFoundError` (`duckdb`, `anthropic`, `google`, `pytest`) | The active interpreter is not the project's `.venv`; activate it or install `requirements-dev.txt` |
 | Model error | Set `ANTHROPIC_MODEL` (or `GEMINI_MODEL` / `OLLAMA_MODEL`) to another available model |
+| `WARNING ... la ventana reciente está dentro de los datos de entrenamiento` | The scoring date is not after the model's `as_of`; fine for a demo, but evaluate with a later date |
 | `ArtifactVersionError: ... se entrenó con scikit-learn X` | The model folder was trained with another scikit-learn version; retrain with `train_clusters.py` |
 | `ContractError: ... supera el límite de 5%` | More than 5% of the raw rows broke a rule; the message lists each rule and its count. Check the source table before relaxing the contract |
 | `[policy] ... bloqueada` in the console | A data tool was called before the OTP was verified; expected behavior |

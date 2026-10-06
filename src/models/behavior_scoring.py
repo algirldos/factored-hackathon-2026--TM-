@@ -11,6 +11,10 @@ import pandas as pd
 from src.contracts import BEHAVIOR_SCORES, CLUSTER_PROFILES, CUSTOMER_SCORES, validate
 
 SUSPICIOUS_DEVIATION = 3.0
+# Metrics that decide whether a customer's recent activity is suspicious (project decision).
+# Profiles keep every metric; only these are scored.
+SUSPICIOUS_FEATURES = ["num_transacciones_monthly", "monto_total_usd_monthly",
+                       "monto_promedio_usd", "monto_mediano_usd", "monto_maximo_usd"]
 MAD_TO_STD = 1.4826   # MAD -> standard deviation for normal data
 IQR_TO_STD = 1.349    # IQR -> standard deviation for normal data
 

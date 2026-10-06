@@ -53,9 +53,9 @@ def transactions(customer_ids, start, days: int, per_day: float = 0.3,
     return pd.DataFrame(rows)
 
 
-def bronze_connection():
-    """In-memory DuckDB with the bronze schema and exchange rates around AS_OF."""
-    con = duckdb.connect(":memory:")
+def bronze_connection(database: str = ":memory:"):
+    """DuckDB (in memory by default) with the bronze schema and exchange rates around AS_OF."""
+    con = duckdb.connect(database)
     con.execute("CREATE SCHEMA bronze")
     con.execute("""CREATE TABLE bronze.daily_exchange_rates (date DATE, source_currency VARCHAR,
                    target_currency VARCHAR, exchange_rate DOUBLE)""")
