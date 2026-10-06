@@ -645,6 +645,41 @@ combined            30     ...        ...      ...
 Because the sample over-represents fraud, **real-world precision will be lower** than reported.
 Recall is not affected by the balancing.
 
+### Held-out evaluation of the clustering model
+
+```bash
+python evaluate_clusters.py --train-as-of 2026-03-18 \
+    --eval-as-of 2026-04-17 2026-05-17 2026-06-17 --rules-negatives 3000
+```
+
+Read-only. The model is trained in memory with data up to `--train-as-of` and evaluated on the
+30-day windows that end on each `--eval-as-of`, which it never saw. The label is customer-level
+(at least one `is_fraud` transaction in the window) and is used only here. Every method is
+compared on the same customers: the clustering model, the bank's `fraud_score` (max in the
+window), the agent's rules (all positives plus a weighted sample of 3,000 negatives) and a
+random ranking. The full report is in `reports/evaluation_20260318.md` and `.json`.
+
+Results on the real data (about 39,000 active customers and 57-59 with fraud per window, a base
+rate of 0.15%):
+
+| Method | Average precision (3 windows) | ROC-AUC (3 windows) |
+|--------|-------------------------------|---------------------|
+| Clustering model | 0.002 - 0.004 | 0.51 - 0.58 |
+| Bank `fraud_score` | 0.53 - 0.64 | 0.81 - 0.84 |
+| Agent rules | 0.002 | 0.50 - 0.56 |
+| Random | 0.002 | 0.44 - 0.54 |
+
+At the default queue threshold (4 of 5 metrics), the clustering model flags 330-354 customers
+per window with 0.3-0.6% precision and 2-3% recall; the bank's `fraud_score`, flagging the same
+number of customers, reaches 9-11% precision.
+
+**Conclusion.** On this dataset, deviations of spending volume and amounts from the customer's
+segment barely separate fraud from normal activity (about random), and the agent's rules do not
+either; the bank's `fraud_score` is far stronger. The clustering signal is kept as a behavior
+alert, not as a fraud detector, and the evaluation should drive what the queue prioritizes.
+The windows are consecutive 30-day periods; one day (2026-05-18) falls between the second and
+third window.
+
 ---
 
 ## Customer clustering model
@@ -839,6 +874,7 @@ bronze schema and synthetic data (`test/factories.py`), and the OTP table and LL
 | `test/test_batch_scoring.py` | Only the 5 chosen metrics are scored, a customer whose spending jumps is enqueued, dry runs write nothing, every `fraud_ops` table is written with consistent counts, repeated runs never enqueue twice, and the CLI uses read-only vs write connections |
 | `test/test_behavior_alerts.py` | The latest run is used, alerts only above the threshold, the alert and the tool outputs contain no cluster, metric, median or model detail, the alert appears only after the OTP, staff receive the detail by email, and the agent works without the scoring tables |
 | `test/test_web_app.py` | Emailed links (token in the fragment, only its hash stored, revocation, expiry, closed cases), the session API, nothing revealed before the OTP, wrong and right codes, escalation from the page, card masking on the server, idle expiry, message and code limits, security headers |
+| `test/test_evaluation.py` | Precision, recall, lift and weighted metrics, precision at the same number of alerts, refusal of windows inside the training data, labels taken only from the window, the rules baseline, the model beating random on synthetic data, the report and the CLI |
 | `test/test_contracts.py` | Each contract rule is detected and named, drop vs raise modes, the 5% limit, and that every pipeline step enforces its contract |
 
 Add a test to `test/` with every new tool, and register the tool in `policy.TOOL_POLICY`:
@@ -908,8 +944,9 @@ add that name at the **start** of the corresponding candidate list.
   and the dataset has no Portuguese conversations to test with. Portuguese is a challenge requirement.
 - **Evaluation.** `--evaluate` compares rules with `fraud_score` on a balanced sample; there is no
   held-out scenario set, prompt-injection test set or cost-per-resolution metric yet.
-- **Weak clustering signal.** With the default threshold, precision against `is_fraud` is 0.7%
-  and recall 3% (see Batch scoring). The 30-day window is noisier than the 12-month profile.
+- **Weak clustering signal.** On held-out windows the clustering model ranks fraud about as well
+  as random (ROC-AUC 0.51-0.58), far below the bank's `fraud_score` (0.81-0.84); see
+  [Held-out evaluation](#held-out-evaluation-of-the-clustering-model).
 - **Compute budget.** `--demo-customers` and `--evaluate` scan the full transactions table. On the
   MotherDuck Lite plan, run them sparingly.
 - **Data privacy.** Transaction data sent to a hosted LLM (Claude or Gemini) leaves the bank's
@@ -928,6 +965,8 @@ factored-hackathon-2026--TM-/
 ├── train_clusters.py           # Trains the clustering model and profiles (see Training)
 ├── score_customers.py          # Scores the last 30 days and writes fraud_ops (see Batch scoring)
 ├── web_app.py                  # Customer web chat server (see Customer web chat)
+├── evaluate_clusters.py        # Held-out evaluation of the clustering model
+├── reports/                    # Evaluation reports (Markdown and JSON)
 ├── motherduck_ia.py            # Natural-language SQL assistant (Ollama, Gemini, MotherDuck AI)
 ├── anomalies.example.csv       # Example input from the anomaly model
 ├── demo_recipients.example.csv # Demo recipient per customer (copy to demo_recipients.csv)
