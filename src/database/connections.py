@@ -1,7 +1,6 @@
 import duckdb
 
-from config.config import MotherDuckConfig
-
+from src.config.config import MotherDuckConfig
 
 def get_motherduck_connection(
     database: str | None = None,
