@@ -120,6 +120,10 @@
   .composer-wrap { padding-bottom: 20px; }
   .notice { font-family: var(--mono); font-size: 12px; color: var(--fg); background: var(--surface-2); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; display: none; }
   .notice.show { display: block; }
+  .demo-banner { font-family: var(--mono); font-size: 12px; border: 1px dashed var(--faint); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; color: var(--muted); }
+  .demo-banner[hidden] { display: none; }
+  .demo-banner b { color: var(--fg); font-weight: 500; letter-spacing: 1px; }
+  .hero .btn { align-self: flex-start; margin-top: 28px; text-decoration: none; display: inline-block; }
   .composer { display: flex; align-items: flex-end; gap: 10px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border-strong); padding: 14px 0; }
   .composer:focus-within { border-bottom-color: var(--fg); }
   .composer .p { font-family: var(--mono); color: var(--muted); line-height: 24px; }
@@ -193,6 +197,7 @@
 
       <div class="composer-wrap">
         <div class="starters" id="starters" aria-label="Respuestas rápidas"></div>
+        <div class="demo-banner" id="demoBanner" role="status" hidden></div>
         <div class="notice" id="notice" role="status"></div>
         <form class="composer" id="form">
           <span class="p" aria-hidden="true">$</span>
@@ -242,6 +247,7 @@ const api = {
     return data;
   },
   start(token) { return this.call("POST", "/api/sessions", { token }); },
+  config() { return this.call("GET", "/api/config"); },
   send(text) { return this.call("POST", "/api/messages", { text }); },
   end() { if (this.sid) this.call("DELETE", "/api/sessions").catch(() => {}); this.sid = null; },
 };
@@ -270,13 +276,14 @@ const input = document.getElementById("input");
 const notice = document.getElementById("notice");
 const startersEl = document.getElementById("starters");
 
-function hero(lede) {
+function hero(lede, action) {
   const wm = wordmark("TARJETAS");
   log.innerHTML = `<section class="hero">
     <div class="wordmark" aria-hidden="true"><pre class="shadow">${wm.shadow}</pre><pre class="face">${wm.face}</pre></div>
     <p class="sr">Tarjetas</p>
     <p class="tagline">Soporte de tarjetas LATAM Bank</p>
-    <p class="lede">${esc(lede)}</p></section>`;
+    <p class="lede">${esc(lede)}</p>
+    ${action ? `<a class="btn" href="${action.href}">${esc(action.label)}</a>` : ""}</section>`;
 }
 
 function addMessage(who, html) {
@@ -342,6 +349,11 @@ function applyStatus(data) {
   state.verified = !!data.verified;
   state.escalated = !!data.escalated;
   state.agentName = data.agent_first_name || state.agentName;
+  if (data.demo_code) {
+    const banner = document.getElementById("demoBanner");
+    banner.innerHTML = `Demo pública: tu código es <b>${esc(data.demo_code)}</b>. En el servicio real llega a tu correo y nunca se muestra aquí.`;
+    banner.hidden = false;
+  }
   if (state.escalated && !wasEscalated) {
     addMessage("system", esc(state.agentName
       ? `Tu caso quedó asignado a ${state.agentName}, del equipo de asesores del banco. Te contactará pronto.`
@@ -357,7 +369,12 @@ async function start() {
   history.replaceState(null, "", location.pathname);           // the token leaves the address bar
   if (!token) {
     state.phase = "no-link";
-    hero("Para revisar tu caso abre el enlace que te enviamos por correo. Si no recibiste ninguno, no necesitas hacer nada.");
+    let demo = false;
+    try { demo = (await api.config()).public_demo; } catch (_) {}
+    hero(demo
+      ? "Para revisar tu caso abre el enlace que te enviamos por correo. Si quieres conocer el servicio, abre un caso de demostración con datos sintéticos."
+      : "Para revisar tu caso abre el enlace que te enviamos por correo. Si no recibiste ninguno, no necesitas hacer nada.",
+      demo ? { href: "/demo", label: "Probar la demo" } : null);
     return render();
   }
   hero("Verificando tu enlace…");
@@ -400,6 +417,7 @@ async function send(raw) {
 
 function endSession(byUser) {
   api.end();
+  document.getElementById("demoBanner").hidden = true;
   state.phase = "ended";
   log.innerHTML = "";
   hero(byUser ? "Cerraste la sesión. Para continuar, abre de nuevo el enlace del correo."

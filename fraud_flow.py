@@ -59,8 +59,15 @@ PUBLIC_URL = os.environ.get("PUBLIC_URL", "")             # e.g. https://xxxx.ng
 # How a new case reaches the customer: "web" (email with a link to the web chat, the OTP is
 # sent when the link is opened) or "whatsapp" (OTP by email + WhatsApp opener).
 CASE_CHANNEL = os.environ.get("CASE_CHANNEL", "web").strip().lower()
-PUBLIC_WEB_URL = os.environ.get("PUBLIC_WEB_URL", "http://localhost:8000").rstrip("/")
+# On Render, RENDER_EXTERNAL_URL is set automatically to the service URL
+PUBLIC_WEB_URL = (os.environ.get("PUBLIC_WEB_URL") or os.environ.get("RENDER_EXTERNAL_URL")
+                  or "http://localhost:8000").rstrip("/")
 LINK_TTL_HOURS = int(os.environ.get("LINK_TTL_HOURS", "72"))
+# Public demo (web_app.py /demo): cases opened for judges and visitors. They never contact
+# anyone, never block a real case and show the code on screen.
+SRC_DEMO = "public_demo"
+PUBLIC_DEMO = os.environ.get("PUBLIC_DEMO", "0") == "1"
+MODEL_SOURCES = {"anomaly_model", SRC_DEMO}
 # Print the OTP in the console (testing only). Defaults to on in demo mode, never in real mode.
 SHOW_OTP_IN_CONSOLE = fa.DEMO_MODE and os.environ.get("SHOW_OTP_IN_CONSOLE", "1") != "0"
 
@@ -216,8 +223,9 @@ def hash_code(otp_id: str, code: str) -> str:
     return hmac.new(OTP_SECRET.encode(), f"{otp_id}:{code}".encode(), hashlib.sha256).hexdigest()
 
 
-def create_otp(case: dict, profile: dict) -> dict:
-    """Generate a new code for the case, store its hash and email it."""
+def create_otp(case: dict, profile: dict, reveal_code: bool = False) -> dict:
+    """Generate a new code for the case, store its hash and email it.
+    reveal_code=True (public demo only): do not email it; return it to show on screen."""
     con = fa.con
     sent = con.execute(f"SELECT COUNT(*) FROM {table('otp_codes')} WHERE case_id = ?",
                        [case["case_id"]]).fetchone()[0]
@@ -234,6 +242,10 @@ def create_otp(case: dict, profile: dict) -> dict:
     con.execute(f"INSERT INTO {table('otp_codes')} VALUES (?, ?, ?, ?, 'email', ?, ?, 0, ?, 'pending', NULL)",
                 [otp_id, case["case_id"], case["customer_id"], hash_code(otp_id, code),
                  created, created + timedelta(minutes=OTP_TTL_MIN), OTP_MAX_ATTEMPTS])
+
+    if reveal_code:
+        return {"sent": True, "delivery": "demo", "expires_in_minutes": OTP_TTL_MIN,
+                "email": fa.mask_email(case["contact_email"]), "demo_code": code}
 
     first = profile.get("first_name") or "cliente"
     where = ("en el chat seguro de LATAM Bank que abriste desde el enlace del correo"
@@ -301,25 +313,27 @@ def case_transactions(case: dict) -> list[dict]:
     products = fa.load_products([t["product"] for t in txs])
     for t in txs:
         t["card"] = fa.describe_product(products.get(t["product"]))
-        if case.get("source") == "anomaly_model":
+        if case.get("source") in MODEL_SOURCES:
             t["reasons"] = ["Marcada por el modelo de detección de anomalías del banco"] + t["reasons"]
     return txs
 
 
 def existing_open_case(customer_id: str) -> str | None:
-    """Case still in progress for this customer (avoids sending several OTPs for one anomaly)."""
+    """Case still in progress for this customer (avoids sending several OTPs for one anomaly).
+    Public demo cases are ignored: a demo never blocks a real case."""
     row = fa.con.execute(
-        f"SELECT case_id FROM {table('fraud_cases')} WHERE customer_id = ? AND status IN "
-        f"({', '.join('?' * len(DEDUP_STATUSES))}) ORDER BY created_at DESC LIMIT 1",
-        [customer_id, *DEDUP_STATUSES]).fetchone()
+        f"SELECT case_id FROM {table('fraud_cases')} WHERE customer_id = ? AND source <> ? "
+        f"AND status IN ({', '.join('?' * len(DEDUP_STATUSES))}) ORDER BY created_at DESC LIMIT 1",
+        [customer_id, SRC_DEMO, *DEDUP_STATUSES]).fetchone()
     return row[0] if row else None
 
 
 def open_case(customer_id: str, tx_ids: list[str] | None = None, days: int = fa.DEFAULT_DAYS,
               source: str = "risk_engine", anomaly_score: float | None = None,
-              email: str | None = None, whatsapp: str | None = None) -> dict | None:
+              email: str | None = None, whatsapp: str | None = None,
+              notify: bool = True) -> dict | None:
     """
-    Open a fraud case, send the OTP by email and the opening WhatsApp message.
+    Open a fraud case and notify the customer through CASE_CHANNEL (notify=False: do not).
     Returns the case, or None when it was skipped (unknown customer, duplicate, nothing to show).
 
     source="anomaly_model": the customer was flagged by the external model, so a case is
@@ -345,7 +359,7 @@ def open_case(customer_id: str, tx_ids: list[str] | None = None, days: int = fa.
     else:
         window, _ = fa.analyze_window(history, days)
         flagged = [t for t in window if t["score"] >= fa.SUSPICIOUS_THRESHOLD]
-        if not flagged and source == "anomaly_model":
+        if not flagged and source in MODEL_SOURCES:
             # The model saw something the rules did not: show the most unusual recent activity
             flagged = sorted(window, key=lambda t: t["score"], reverse=True)[:MODEL_FALLBACK_TX]
     if not flagged:
@@ -353,7 +367,7 @@ def open_case(customer_id: str, tx_ids: list[str] | None = None, days: int = fa.
         return None
 
     reasons = sorted({r for t in flagged for r in t["reasons"]})
-    if source == "anomaly_model":
+    if source in MODEL_SOURCES:
         reasons.insert(0, "Cliente marcado por el modelo de detección de anomalías")
     email, whatsapp = fa.resolve_recipients(profile, email, whatsapp)
     case = {
@@ -372,10 +386,32 @@ def open_case(customer_id: str, tx_ids: list[str] | None = None, days: int = fa.
          case["max_score"], case["reasons"], email, case["contact_whatsapp"], fa.DEMO_MODE,
          ST_OTP_SENT, anomaly_score])
 
-    delivery = notify_case(case, profile, whatsapp)
+    delivery = notify_case(case, profile, whatsapp) if notify else "sin aviso"
     print(f"  {customer_id}: caso {case['case_id']} ({source}) | {len(flagged)} transacciones | "
           f"puntaje máx. {case['max_score']:.0f} | {delivery}")
     return case
+
+
+def demo_pool(limit: int = 50) -> list[str]:
+    """Customers flagged in the latest scoring run: the cases the public demo shows."""
+    from src.models.batch_scoring import DEFAULT_MIN_SUSPICIOUS
+    rows = fa.con.execute(f"""
+        SELECT customer_id FROM {table('customer_anomaly')}
+        WHERE as_of = (SELECT MAX(as_of) FROM {table('customer_anomaly')}) AND n_suspicious >= ?
+        ORDER BY n_suspicious DESC, anomaly_score DESC, customer_id LIMIT ?""",
+        [DEFAULT_MIN_SUSPICIOUS, limit]).fetchall()
+    return [r[0] for r in rows]
+
+
+def open_demo_case(customer_id: str) -> tuple[dict, str] | None:
+    """Fresh public-demo case for a flagged customer and its link token. Nothing is sent."""
+    fa.con.execute(f"UPDATE {table('fraud_cases')} SET status = ?, updated_at = ? "
+                   f"WHERE customer_id = ? AND source = ? AND status <> ?",
+                   [ST_CLOSED, now(), customer_id, SRC_DEMO, ST_CLOSED])
+    case = open_case(customer_id, source=SRC_DEMO, notify=False)
+    if not case or case.get("duplicate"):
+        return None
+    return case, create_case_link(case["case_id"])
 
 
 def notify_case(case: dict, profile: dict, whatsapp: str | None = None) -> str:
@@ -523,13 +559,14 @@ def process_queue(days: int = fa.DEFAULT_DAYS, limit: int = 50) -> list[dict]:
     return cases
 
 
-def web_opening_message(profile: dict, email: str | None) -> str:
+def web_opening_message(profile: dict, email: str | None, demo: bool = False) -> str:
     """First message of the web chat, shown when the customer opens the link."""
     first = profile.get("first_name") or "cliente"
+    where = ("que aparece en el aviso de demostración" if demo
+             else f"que acabamos de enviar a su correo {fa.mask_email(email)}")
     return (f"Hola {first}. Hemos detectado un comportamiento sospechoso en su actividad "
             f"bancaria. Para proteger su información, primero verifique su identidad: escriba el "
-            f"código de 6 dígitos que acabamos de enviar a su correo {fa.mask_email(email)}. "
-            f"Nunca le pediremos contraseñas, PIN ni CVV.")
+            f"código de 6 dígitos {where}. Nunca le pediremos contraseñas, PIN ni CVV.")
 
 
 def opening_message(profile: dict, email: str | None) -> str:
@@ -654,7 +691,10 @@ def escalate(case: dict, profile: dict, language: str, reason: str, summary: str
     staff_detail = internal_note(fa.behavior_anomaly(case["customer_id"]))
     if staff_detail:
         note += f"\n\n{staff_detail}"
-    delivery = fa.send_email(to, f"LATAM Bank: caso {case['case_id']} asignado", note)
+    if case.get("source") == SRC_DEMO:
+        delivery = "demo: sin correo al asesor"
+    else:
+        delivery = fa.send_email(to, f"LATAM Bank: caso {case['case_id']} asignado", note)
     print(f"  [escalamiento] {escalation_id} -> {best['agent_id']} {best['first_name']} "
           f"{best['last_name']} ({best['routing_score']}) | aviso: {delivery}", flush=True)
     return {"escalated": True, "escalation_id": escalation_id,
@@ -697,7 +737,10 @@ def build_flow_tools(case: dict, profile: dict, state: dict | None = None) -> li
         if state["last_resend"] and (now() - state["last_resend"]).total_seconds() < 60:
             return {"sent": True, "note": "A code was sent less than a minute ago; ask the "
                                           "customer to check their email (and spam folder)."}
-        result = create_otp(case, profile)
+        demo = PUBLIC_DEMO and case.get("source") == SRC_DEMO
+        result = create_otp(case, profile, reveal_code=demo)
+        if demo and "demo_code" in result:
+            state["demo_code"] = result.pop("demo_code")  # shown by the page, not given to the LLM
         if result.get("sent"):
             state["last_resend"] = now()
         return result
@@ -707,7 +750,7 @@ def build_flow_tools(case: dict, profile: dict, state: dict | None = None) -> li
         print("  [tool] get_case_details()", flush=True)
         txs = case_transactions(case)
         details = {"case_id": case["case_id"],
-                   "flagged_by": "anomaly detection model" if case.get("source") == "anomaly_model"
+                   "flagged_by": "anomaly detection model" if case.get("source") in MODEL_SOURCES
                                  else "rule-based risk engine",
                    "anomaly_score": case.get("anomaly_score"),
                    "transactions": [fa.to_json(t) for t in txs]}
@@ -796,8 +839,11 @@ def new_session(case: dict, channel: str = "whatsapp") -> dict:
     """LLM chat bound to a case (provider per LLM_PROVIDER). session["state"] holds the
     verification and escalation state of its tools."""
     profile = fa.get_customer_profile(case["customer_id"]) or {"customer_id": case["customer_id"]}
-    opener = (web_opening_message if channel == "web" else opening_message)(
-        profile, case["contact_email"])
+    if channel == "web":
+        demo = PUBLIC_DEMO and case.get("source") == SRC_DEMO
+        opener = web_opening_message(profile, case["contact_email"], demo=demo)
+    else:
+        opener = opening_message(profile, case["contact_email"])
     state: dict = {}
     session = fa.create_llm_session(
         FLOW_INSTRUCTIONS.format(

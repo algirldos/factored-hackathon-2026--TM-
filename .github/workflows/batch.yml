@@ -1,0 +1,78 @@
+name: Batch jobs
+
+# Manual runs from the Actions tab, plus an optional daily scoring.
+# The daily schedule only runs when the repository variable ENABLE_SCHEDULED_SCORING is "true":
+# the dataset is historical, so "yesterday" has no transactions until real data flows in.
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "score | process-queue | train"
+        required: true
+        default: score
+        type: choice
+        options: [score, process-queue, train]
+      as_of:
+        description: "Fecha de corte AAAA-MM-DD (score y train)"
+        required: false
+        default: "2026-06-17"
+      min_suspicious:
+        description: "Métricas sospechosas para encolar (score)"
+        required: false
+        default: "4"
+  schedule:
+    - cron: "0 9 * * *"   # 09:00 UTC every day
+
+permissions:
+  contents: read
+
+concurrency:
+  group: batch-jobs        # never two jobs writing fraud_ops at the same time
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_SCHEDULED_SCORING == 'true'
+    runs-on: ubuntu-latest
+    env:
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      OTP_SECRET: ${{ secrets.OTP_SECRET }}
+      PUBLIC_WEB_URL: ${{ vars.PUBLIC_WEB_URL }}
+      CASE_CHANNEL: web
+      DEMO_MODE: ${{ vars.DEMO_MODE || '1' }}
+      SHOW_OTP_IN_CONSOLE: "0"
+      TEST_ALERT_EMAIL: ${{ secrets.TEST_ALERT_EMAIL }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      WHATSAPP_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Score customers
+        if: github.event_name == 'schedule' || inputs.task == 'score'
+        run: |
+          AS_OF="${{ inputs.as_of }}"
+          [ -z "$AS_OF" ] && AS_OF=$(date -u -d yesterday +%F)
+          python score_customers.py --as-of "$AS_OF" --min-suspicious "${{ inputs.min_suspicious || '4' }}"
+
+      - name: Open cases from the queue (sends the link emails)
+        if: inputs.task == 'process-queue'
+        run: python fraud_flow.py --process-queue
+
+      - name: Train the clustering model
+        if: inputs.task == 'train'
+        run: python train_clusters.py --as-of "${{ inputs.as_of }}" --models-dir trained
+
+      - name: Upload the trained model (commit it to models/ to deploy it)
+        if: inputs.task == 'train'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clusters-model
+          path: trained/

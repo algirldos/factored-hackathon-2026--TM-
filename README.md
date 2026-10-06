@@ -19,6 +19,10 @@ human operator's approval, sends an alert or escalates to a service agent.
 > **Status.** Card actions (lock, unlock, report lost or stolen) and Portuguese templates are not
 > implemented yet. See [Limitations](#limitations).
 
+**Try the demo:** open `<service URL>/demo` (see [Public demo](#public-demo-for-judges)). It opens a
+case for a customer flagged by the model on the synthetic dataset, shows the one-time code on
+screen and contacts nobody.
+
 ---
 
 ## Table of contents
@@ -35,11 +39,12 @@ human operator's approval, sends an alert or escalates to a service agent.
 10. [Evaluation](#evaluation)
 11. [Customer clustering model](#customer-clustering-model)
 12. [Tests](#tests)
-13. [Audit log](#audit-log)
-14. [Column mapping](#column-mapping)
-15. [Limitations](#limitations)
-16. [Project structure](#project-structure)
-17. [Troubleshooting](#troubleshooting)
+13. [Deployment](#deployment)
+14. [Audit log](#audit-log)
+15. [Column mapping](#column-mapping)
+16. [Limitations](#limitations)
+17. [Project structure](#project-structure)
+18. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -512,8 +517,10 @@ python fraud_agent.py --customer <ID>    # start the chat
 | `AGENTS_TABLE` | | `bronze.service_agents` | Service agents table used for routing |
 | `PUBLIC_URL` | | | Public HTTPS URL of the webhook (ngrok); enables Twilio signature validation |
 | `WHATSAPP_SERVER_PORT` | | `8080` | Port of the WhatsApp webhook |
+| `PUBLIC_DEMO` | | `0` | `1`: enables `/demo` (codes on screen, nothing sent). Only for the public demo |
+| `DEMO_PER_IP_HOUR`, `DEMO_DAILY_LIMIT` | | `5`, `150` | Public demo quotas per visitor per hour and per day |
 | `CASE_CHANNEL` | | `web` | `web`: new cases send an email with a link to the web chat. `whatsapp`: OTP by email + WhatsApp opener |
-| `PUBLIC_WEB_URL` | | `http://localhost:8000` | Public URL of the web chat, used in the emailed links (HTTPS in production) |
+| `PUBLIC_WEB_URL` | | `RENDER_EXTERNAL_URL` or `http://localhost:8000` | Public URL of the web chat, used in the emailed links (HTTPS in production) |
 | `LINK_TTL_HOURS` | | `72` | Hours an emailed link stays valid |
 | `WEB_IDLE_TIMEOUT_S`, `WEB_MAX_MESSAGES` | | `300`, `40` | Web session idle timeout and messages per session |
 | `HOST`, `PORT` | | `127.0.0.1`, `8000` | Address of `web_app.py` |
@@ -875,6 +882,7 @@ bronze schema and synthetic data (`test/factories.py`), and the OTP table and LL
 | `test/test_behavior_alerts.py` | The latest run is used, alerts only above the threshold, the alert and the tool outputs contain no cluster, metric, median or model detail, the alert appears only after the OTP, staff receive the detail by email, and the agent works without the scoring tables |
 | `test/test_web_app.py` | Emailed links (token in the fragment, only its hash stored, revocation, expiry, closed cases), the session API, nothing revealed before the OTP, wrong and right codes, escalation from the page, card masking on the server, idle expiry, message and code limits, security headers |
 | `test/test_evaluation.py` | Precision, recall, lift and weighted metrics, precision at the same number of alerts, refusal of windows inside the training data, labels taken only from the window, the rules baseline, the model beating random on synthetic data, the report and the CLI |
+| `test/test_web_demo.py` | `/health` (including a broken database), `/api/config`, the demo is off unless enabled, demo cases send nothing and show the code, a new code on resend, escalation without email, demos never block real cases, real cases still email the code, per-visitor and daily quotas |
 | `test/test_contracts.py` | Each contract rule is detected and named, drop vs raise modes, the 5% limit, and that every pipeline step enforces its contract |
 
 Add a test to `test/` with every new tool, and register the tool in `policy.TOOL_POLICY`:
@@ -882,6 +890,76 @@ Add a test to `test/` with every new tool, and register the tool in `policy.TOOL
 
 The tests do not cover the risk rules or the clustering model against real data, nor the web
 chat; `--evaluate` and a manual run cover those for now.
+
+---
+
+## Deployment
+
+| Piece | Where | Files |
+|-------|-------|-------|
+| Customer web chat (`web_app.py`) | Render web service from the Docker image | `Dockerfile`, `.dockerignore`, `render.yaml` |
+| Tests on every push and pull request | GitHub Actions | `.github/workflows/tests.yml` |
+| Batch jobs: scoring, case queue, training | GitHub Actions, manual or daily | `.github/workflows/batch.yml` |
+| Data | MotherDuck (`latam_bank`, schema `fraud_ops` for everything the system writes) | |
+
+### Render
+
+1. In Render: **New > Blueprint**, pick this repository and the `main` branch. Render reads
+   `render.yaml` and creates the `latam-bank-card-support` web service (Docker, free plan).
+2. Fill in the two secrets it asks for: `MOTHERDUCK_TOKEN` (read/write: the chat writes cases,
+   codes and links in `fraud_ops`) and `ANTHROPIC_API_KEY`. `OTP_SECRET` is generated by Render.
+3. Deploy. Render checks `GET /health` (it also checks the MotherDuck connection) and sets
+   `RENDER_EXTERNAL_URL`, which the emailed links use as `PUBLIC_WEB_URL`.
+4. Make sure `fraud_ops.customer_anomaly` has a scoring run (`score_customers.py`, see Batch
+   scoring): the demo picks its customers from the latest one.
+
+`render.yaml` deploys in **public demo mode**: `PUBLIC_DEMO=1`, `DEMO_MODE=1`, `EMAIL_ENABLED=0`,
+`WHATSAPP_ENABLED=0` and codes kept out of the logs. For a real pilot, set `PUBLIC_DEMO=0`,
+`EMAIL_ENABLED=1` and the SMTP variables.
+
+The free plan sleeps after about 15 minutes without traffic, and the first request then takes
+up to a minute while the container starts and connects to MotherDuck. Open the URL shortly
+before a review. The service must run as **one instance**: sessions live in memory and the
+agent shares one database connection.
+
+To build the image locally (needs Docker Desktop running):
+
+```bash
+docker build -t latam-card-support .
+docker run --rm -p 8000:8000 --env-file .env -e PUBLIC_DEMO=1 latam-card-support
+```
+
+### Public demo for judges
+
+With `PUBLIC_DEMO=1`, `GET /demo` opens a fresh case for one of the customers flagged by the
+latest scoring run (synthetic data) and redirects to the chat with its link. The page also shows
+a **Probar la demo** button when opened without a link.
+
+| What | Demo behavior |
+|------|---------------|
+| Code | Shown on screen in a "Demo pública" banner instead of being emailed; "Envíame un código nuevo" shows a new one |
+| Messages | Nothing is sent: no link email, no code email, no email to the advisor on escalation |
+| Agent | The real one: Claude, the real case data from MotherDuck, `policy.py` and the neutral behavior alert |
+| Real cases | Demo cases are stored with `source = public_demo`, never block a real case for the same customer, and a new demo for the same customer closes the previous one |
+| Cost limits | 5 demos per visitor per hour, 150 per day (`DEMO_PER_IP_HOUR`, `DEMO_DAILY_LIMIT`) and 40 messages per session |
+
+Suggested script for the reviewers: open `/demo`, type the code from the banner, ask "¿Qué
+pasó con mi cuenta?", answer "No reconozco estas transacciones" or press **Hablar con un
+asesor**, and see the case handed to a named advisor.
+
+### Batch jobs (GitHub Actions)
+
+`batch.yml` runs from the **Actions** tab (`workflow_dispatch`) with a `task`:
+
+| Task | Command | Secrets / variables |
+|------|---------|---------------------|
+| `score` | `score_customers.py --as-of <date>` | `MOTHERDUCK_TOKEN` |
+| `process-queue` | `fraud_flow.py --process-queue` (sends the link emails) | `MOTHERDUCK_TOKEN`, `OTP_SECRET`, SMTP secrets, `TEST_ALERT_EMAIL`, variable `PUBLIC_WEB_URL` |
+| `train` | `train_clusters.py --as-of <date>`, uploaded as an artifact (commit it to `models/` to use it) | `MOTHERDUCK_TOKEN` |
+
+A daily scoring run at 09:00 UTC is included but only runs when the repository variable
+`ENABLE_SCHEDULED_SCORING` is `true`: the dataset is historical, so "yesterday" has no data
+until real transactions flow in. Jobs never overlap (`concurrency: batch-jobs`).
 
 ---
 
@@ -965,6 +1043,9 @@ factored-hackathon-2026--TM-/
 ├── train_clusters.py           # Trains the clustering model and profiles (see Training)
 ├── score_customers.py          # Scores the last 30 days and writes fraud_ops (see Batch scoring)
 ├── web_app.py                  # Customer web chat server (see Customer web chat)
+├── Dockerfile, .dockerignore   # Container image of the web chat
+├── render.yaml                 # Render Blueprint (public demo mode)
+├── .github/workflows/          # Tests on push/PR; batch jobs (score, queue, train)
 ├── evaluate_clusters.py        # Held-out evaluation of the clustering model
 ├── reports/                    # Evaluation reports (Markdown and JSON)
 ├── motherduck_ia.py            # Natural-language SQL assistant (Ollama, Gemini, MotherDuck AI)
@@ -1005,6 +1086,8 @@ local models (Ollama), Gemini or MotherDuck's built-in AI. Run `python motherduc
 | `ModuleNotFoundError` (`duckdb`, `anthropic`, `google`, `pytest`) | The active interpreter is not the project's `.venv`; activate it or install `requirements-dev.txt` |
 | Model error | Set `ANTHROPIC_MODEL` (or `GEMINI_MODEL` / `OLLAMA_MODEL`) to another available model |
 | `WARNING ... la ventana reciente está dentro de los datos de entrenamiento` | The scoring date is not after the model's `as_of`; fine for a demo, but evaluate with a later date |
+| `/demo` answers 503 "No hay casos de demostración" | The latest scoring run has no customer with 4+ suspicious metrics, or `score_customers.py` never wrote `fraud_ops`; run it |
+| Render health check fails | `MOTHERDUCK_TOKEN` missing or read-only; check the service logs |
 | `ArtifactVersionError: ... se entrenó con scikit-learn X` | The model folder was trained with another scikit-learn version; retrain with `train_clusters.py` |
 | `ContractError: ... supera el límite de 5%` | More than 5% of the raw rows broke a rule; the message lists each rule and its count. Check the source table before relaxing the contract |
 | `[policy] ... bloqueada` in the console | A data tool was called before the OTP was verified; expected behavior |
