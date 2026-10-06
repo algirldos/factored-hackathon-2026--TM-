@@ -1,0 +1,18 @@
+{
+    "country_currency": {
+        "Colombia": "COP",
+        "United States": "USD",
+        "United Kingdom": "GBP",
+        "Germany": "EUR",
+        "Argentina": "ARS",
+        "México": "MXN"
+    },
+    "currency_to_usd": {
+        "COP": 0.000297,
+        "USD": 1.0,
+        "GBP": 1.27,
+        "EUR": 1.08,
+        "ARS": 0.0053,
+        "MXN": 0.055
+    }
+}

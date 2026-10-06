@@ -1,0 +1,30 @@
+# Secrets and local environments never go into the image
+.env
+*.env
+.venv/
+venv/
+.claude/
+.git/
+.github/
+
+# Not needed to serve the chat
+notebooks/
+src/data/
+src/EDA.ipynb
+disclamer/
+reports/
+test/
+pytest.ini
+requirements-dev.txt
+Datathon1.md
+models/customer_clustering/
+models/transaction_profiles/
+
+# Generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+sent_alerts.jsonl
+demo_recipients.csv
+*.log

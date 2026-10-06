@@ -1,0 +1,43 @@
+# Render Blueprint: New > Blueprint > pick this repository.
+# Secrets marked "sync: false" are asked for in the Render dashboard; they never live in git.
+services:
+  - type: web
+    name: latam-bank-card-support
+    runtime: docker
+    plan: free                    # sleeps after ~15 min without traffic; first request wakes it
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      # --- Secrets (set them in the dashboard) ---
+      - key: MOTHERDUCK_TOKEN     # read/write: the chat writes cases, OTPs and links in fraud_ops
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OTP_SECRET           # random server-side pepper for OTP hashes
+        generateValue: true
+      # --- Agent ---
+      - key: LLM_PROVIDER
+        value: anthropic
+      - key: MOTHERDUCK_DB
+        value: latam_bank
+      # --- Public demo for judges: nothing is sent, codes are shown on screen ---
+      - key: PUBLIC_DEMO
+        value: "1"
+      - key: DEMO_MODE
+        value: "1"
+      - key: EMAIL_ENABLED
+        value: "0"
+      - key: WHATSAPP_ENABLED
+        value: "0"
+      - key: SHOW_OTP_IN_CONSOLE  # keep codes out of the Render logs
+        value: "0"
+      - key: CASE_CHANNEL
+        value: web
+      - key: DEMO_PER_IP_HOUR
+        value: "5"
+      - key: DEMO_DAILY_LIMIT
+        value: "150"
+      - key: WEB_MAX_MESSAGES
+        value: "40"
+      # PUBLIC_WEB_URL defaults to RENDER_EXTERNAL_URL, which Render sets automatically.

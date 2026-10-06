@@ -1,0 +1,60 @@
+{
+  "model_version": "clusters_20260617",
+  "as_of": "2026-06-17",
+  "profile_window": {
+    "start": "2025-06-18",
+    "end_inclusive": "2026-06-17"
+  },
+  "recent_window_days": 30,
+  "n_customers": 72380,
+  "n_customers_with_activity": 69598,
+  "n_transactions": 774568,
+  "cluster_sizes": {
+    "0": 21557,
+    "1": 42618,
+    "2": 8205
+  },
+  "n_clusters": 3,
+  "n_pca_components": 6,
+  "random_state": 42,
+  "pca_explained_variance": 0.8469,
+  "profile_features": [
+    "num_transacciones_monthly",
+    "monto_total_usd_monthly",
+    "num_dias_activos_monthly",
+    "num_productos_monthly",
+    "num_tipos_transaccion_monthly",
+    "num_monedas_monthly",
+    "num_paises_transaccion_monthly",
+    "num_ciudades_transaccion_monthly",
+    "monto_promedio_usd",
+    "monto_mediano_usd",
+    "monto_maximo_usd",
+    "monto_p95_usd",
+    "monto_std_usd",
+    "transacciones_por_dia_activo",
+    "porcentaje_fin_semana",
+    "porcentaje_nocturnas",
+    "tasa_aprobacion",
+    "participacion_tipo_dominante"
+  ],
+  "usd_rates": {
+    "COP": 0.000297,
+    "USD": 1.0,
+    "GBP": 1.27,
+    "EUR": 1.08,
+    "ARS": 0.0053,
+    "MXN": 0.055
+  },
+  "usd_rates_source": "currency_config.json",
+  "data_fingerprint": {
+    "customer_features": "a21300dc8814e0bc",
+    "behavior": "9a0de424a9bde43c"
+  },
+  "versions": {
+    "python": "3.12.9",
+    "scikit-learn": "1.9.1",
+    "pandas": "3.0.6",
+    "numpy": "2.5.3"
+  }
+}
