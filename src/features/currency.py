@@ -1,9 +1,9 @@
 """
 Currency conversion to USD.
 
-Rates come from bronze.daily_exchange_rates for the scoring date (see
-src/features/sources.py). The static file src/config/currency_config.json is kept
-only for the country -> currency mapping and as an explicit fallback for exploration.
+Project decision: training and scoring use the fixed rates of
+src/config/currency_config.json, so features do not move with the exchange rate.
+sources.load_usd_rates reads bronze.daily_exchange_rates for anyone who needs daily rates.
 """
 import json
 import unicodedata
@@ -30,7 +30,7 @@ def country_currency_map(config: dict | None = None) -> dict[str, str]:
 
 
 def static_usd_rates(config: dict | None = None) -> dict[str, float]:
-    """Fixed rates from currency_config.json. Only for exploration: they do not change over time."""
+    """Fixed rates from currency_config.json: the rates used by training and scoring."""
     config = config or load_currency_config()
     return dict(config["currency_to_usd"])
 

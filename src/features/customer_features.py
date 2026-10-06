@@ -6,7 +6,7 @@ Output: one row per eligible customer with the columns the clustering model expe
 
 Changes from the notebook, so the result is reproducible and safe for production:
 - Age is computed at an explicit `as_of` date, not "today".
-- USD rates are passed in (daily rates of the scoring date), not read from a fixed file.
+- USD rates are passed in explicitly (the project uses the fixed rates of currency_config.json).
 - Every product column always exists, even when a batch has no product of that type
   (the notebook's pivot only created the columns present in the data).
 - Customers whose income cannot be converted to USD are dropped and counted, instead of

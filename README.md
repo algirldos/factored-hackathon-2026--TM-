@@ -618,7 +618,7 @@ scoring and the agent share the same code. The notebooks remain for exploration.
 | Module | Notebook origin | What it does |
 |--------|-----------------|--------------|
 | `src/features/sources.py` | `bank_reader.py` | Reads customers, products, transactions and exchange rates from MotherDuck; filters and deduplicates in SQL |
-| `src/features/currency.py` | `01_eda` §1 | Country to currency mapping and USD rates from `bronze.daily_exchange_rates` |
+| `src/features/currency.py` | `01_eda` §1 | Country to currency mapping and the fixed USD rates of `currency_config.json` |
 | `src/features/customer_features.py` | `01_eda` §1-2 | One row per eligible customer: balances per product, debt, assets, age |
 | `src/models/customer_clustering.py` | `03` §2-10, 21-23 | Preprocessor, PCA and K-means: fit, save, load and assign clusters |
 | `src/features/transaction_behavior.py` | `03` §12-18 | Baseline (12 months) and recent (30 days) windows and the behavior metrics |
@@ -628,11 +628,40 @@ Differences from the notebooks, made so results are reproducible:
 
 - Everything is computed at an explicit `as_of` date: age, windows and exchange rates. The
   notebooks used today's date and the latest timestamp in the data (with its time of day).
-- USD amounts use the daily rates of `as_of`, not the fixed rates of `currency_config.json`.
+- USD amounts use the fixed rates of `src/config/currency_config.json` (a project decision, so
+  features do not move with the exchange rate); `sources.load_usd_rates` can read daily rates if
+  that decision changes.
 - Duplicate rows of the bronze layer are removed (customers and products by `last_updated`,
   transactions by `transaction_id`), so balances and amounts are not counted twice.
 - Every product column exists even when scoring a single customer.
 - `is_fraud` is no longer a required input: it is the evaluation label only.
+
+### Training
+
+```bash
+python train_clusters.py --as-of 2026-05-31
+```
+
+Trains the customer model and the cluster profiles with data **up to `--as-of`** (read-only
+MotherDuck connection, `MOTHERDUCK_TOKEN` in `.env`) and writes a versioned folder:
+
+```text
+models/clusters_20260531/
+├── customer_cluster_model.joblib     # preprocessor + PCA + K-means
+├── cluster_behavior_profiles.joblib  # robust statistics per cluster (same keys as the notebook)
+└── metadata.json                     # what was trained, with which data and libraries
+```
+
+| Guarantee | How |
+|-----------|-----|
+| Same date and data give the same model | Fixed random state, rows sorted by `customer_id`; `metadata.json` stores a fingerprint of the training data to prove it |
+| No future data | Customer features and the 12-month profile window end on `--as-of` (USD rates are fixed); a test adds transactions after that date and checks the model does not change |
+| Traceable | `metadata.json` records the version, `as_of`, windows, number of customers and transactions, cluster sizes, explained variance, the USD rates used (and their source) and the Python, scikit-learn, pandas and numpy versions |
+| Loadable | `load_artifacts` refuses a folder trained with another scikit-learn minor version, with a message that says which one, instead of failing inside joblib |
+
+To evaluate without leakage, train at a date and score a later period (stage 6 of the plan).
+Customer and product tables are monthly snapshots without history, so customer attributes
+are the latest available, not the ones at `--as-of`.
 
 ### Data contracts
 
@@ -647,7 +676,7 @@ columns, types, nulls, ranges, allowed values, unique keys and cross-column rule
 | `TRANSACTION_BEHAVIOR` | `build_transaction_behavior` (output) | raise | One row per customer, at least one transaction, shares between 0 and 1 |
 | `CLUSTER_PROFILES` | `build_cluster_profiles` (output), `score_customers` (input) | raise | One row per cluster and feature, `mad` ≥ 0, `p25` ≤ `p75` |
 | `BEHAVIOR_SCORES`, `CUSTOMER_SCORES` | `score_customers` (output) | raise | Deviation ≥ 0 (infinite allowed), suspicious metrics ≤ metrics scored |
-| `validate_usd_rates` | `load_usd_rates` | raise | USD = 1, every rate positive and finite |
+| `validate_usd_rates` | `train`, `load_usd_rates` | raise | USD = 1, every rate positive and finite |
 
 - **drop** (raw bronze data, which has known quality issues): invalid rows are removed and
   logged with the rule they broke. If more than 5% of the rows are invalid the step stops,
@@ -655,10 +684,11 @@ columns, types, nulls, ranges, allowed values, unique keys and cross-column rule
 - **raise** (data produced by our own code): any violation stops the step; it is a bug.
 - A missing column or a wrong type always stops the step, in both modes.
 
-**Status of the saved artifacts.** `models/customer_clustering/customer_cluster_model.joblib`
-was trained with scikit-learn 1.1.3 and does not load with the pinned version (1.9.1); it must
-be retrained with the new modules (stage 3 of the production plan). The cluster profiles file
-loads, but was built with the notebook's windows.
+**Status of the saved artifacts.** `models/customer_clustering/` and
+`models/transaction_profiles/` were produced by the notebook: the customer model was trained
+with scikit-learn 1.1.3 and does not load with the pinned version (1.9.1). Replace them by
+running `train_clusters.py` with a MotherDuck token; the new folders are versioned and do
+not overwrite the old ones.
 
 **Known caveat.** Profiles are built from 12-month averages, while scoring uses 30 days with
 fewer transactions, so recent metrics are noisier and can look unusual more often than they
@@ -690,6 +720,7 @@ bronze schema and synthetic data (`test/factories.py`), and the OTP table and LL
 | `test/test_customer_clustering.py` | Deterministic fit, save/load round trip, unseen categories, missing columns |
 | `test/test_behavior_scoring.py` | Robust deviation (MAD, IQR fallback, zero spread), cluster profiles, suspicious metrics |
 | `test/test_sources.py` | SQL readers on an in-memory DuckDB with the bronze schema, and the full flow from the database to a flagged customer |
+| `test/test_training.py` | Training metadata, notebook-compatible profiles, determinism, no data after `as_of`, save/load round trip, refusal of another scikit-learn version, and the CLI |
 | `test/test_contracts.py` | Each contract rule is detected and named, drop vs raise modes, the 5% limit, and that every pipeline step enforces its contract |
 
 Add a test to `test/` with every new tool, and register the tool in `policy.TOOL_POLICY`:
@@ -753,9 +784,8 @@ add that name at the **start** of the corresponding candidate list.
   and the dataset has no Portuguese conversations to test with. Portuguese is a challenge requirement.
 - **Evaluation.** `--evaluate` compares rules with `fraud_score` on a balanced sample; there is no
   held-out scenario set, prompt-injection test set or cost-per-resolution metric yet.
-- **Clustering model not connected.** The modules are ready and tested, but the saved model must
-  be retrained (scikit-learn version) and its scores are not yet written to `fraud_ops` nor
-  used by the agent.
+- **Clustering model not connected.** Training is ready and tested, but it has not been run on
+  the real data yet, and the scores are not written to `fraud_ops` nor used by the agent.
 - **Compute budget.** `--demo-customers` and `--evaluate` scan the full transactions table. On the
   MotherDuck Lite plan, run them sparingly.
 - **Data privacy.** Transaction data sent to a hosted LLM (Claude or Gemini) leaves the bank's
@@ -771,6 +801,7 @@ factored-hackathon-2026--TM-/
 ├── fraud_agent.py              # Risk engine, data access, alert delivery, console chat
 ├── fraud_flow.py               # OTP-verified WhatsApp flow and agent routing
 ├── policy.py                   # Tool permissions enforced in code (OTP gate, deny by default)
+├── train_clusters.py           # Trains the clustering model and profiles (see Training)
 ├── motherduck_ia.py            # Natural-language SQL assistant (Ollama, Gemini, MotherDuck AI)
 ├── anomalies.example.csv       # Example input from the anomaly model
 ├── demo_recipients.example.csv # Demo recipient per customer (copy to demo_recipients.csv)
@@ -808,6 +839,7 @@ local models (Ollama), Gemini or MotherDuck's built-in AI. Run `python motherduc
 | `Faltan columnas obligatorias` | Add the real column names to `TX_COLUMN_CANDIDATES` |
 | `ModuleNotFoundError` (`duckdb`, `anthropic`, `google`, `pytest`) | The active interpreter is not the project's `.venv`; activate it or install `requirements-dev.txt` |
 | Model error | Set `ANTHROPIC_MODEL` (or `GEMINI_MODEL` / `OLLAMA_MODEL`) to another available model |
+| `ArtifactVersionError: ... se entrenó con scikit-learn X` | The model folder was trained with another scikit-learn version; retrain with `train_clusters.py` |
 | `ContractError: ... supera el límite de 5%` | More than 5% of the raw rows broke a rule; the message lists each rule and its count. Check the source table before relaxing the contract |
 | `[policy] ... bloqueada` in the console | A data tool was called before the OTP was verified; expected behavior |
 | `Tools without a policy in policy.TOOL_POLICY` | A new tool was added without registering its permissions in `policy.py` |

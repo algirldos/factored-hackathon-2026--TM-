@@ -53,6 +53,12 @@ def behavior_windows(as_of, baseline_months: int = BASELINE_MONTHS,
     return Window(baseline_start, recent_start), Window(recent_start, recent_end)
 
 
+def profile_window(as_of, months: int = BASELINE_MONTHS) -> Window:
+    """The `months` months that end on `as_of` (included): the history used to train profiles."""
+    end = pd.Timestamp(as_of).normalize() + pd.Timedelta(days=1)
+    return Window(end - pd.DateOffset(months=months), end)
+
+
 def select_window(transactions: pd.DataFrame, window: Window) -> pd.DataFrame:
     dates = pd.to_datetime(transactions["transaction_date"], errors="coerce")
     return transactions[(dates >= window.start) & (dates < window.end)].copy()

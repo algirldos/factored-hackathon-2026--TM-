@@ -1,4 +1,5 @@
 """Small synthetic datasets shaped like the LATAM Bank bronze tables."""
+import duckdb
 import numpy as np
 import pandas as pd
 
@@ -50,3 +51,32 @@ def transactions(customer_ids, start, days: int, per_day: float = 0.3,
                          "amount_usd": value, "transaction_country": "Colombia",
                          "transaction_city": "Bogotá", "transaction_status": "Approved"})
     return pd.DataFrame(rows)
+
+
+def bronze_connection():
+    """In-memory DuckDB with the bronze schema and exchange rates around AS_OF."""
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE SCHEMA bronze")
+    con.execute("""CREATE TABLE bronze.daily_exchange_rates (date DATE, source_currency VARCHAR,
+                   target_currency VARCHAR, exchange_rate DOUBLE)""")
+    con.execute("""INSERT INTO bronze.daily_exchange_rates VALUES
+                   ('2026-06-16', 'COP', 'USD', 0.00020), ('2026-06-17', 'COP', 'USD', 0.00025),
+                   ('2026-06-17', 'USD', 'MXN', 20.0),    ('2026-06-17', 'ARS', 'USD', 0.001),
+                   ('2026-06-18', 'COP', 'USD', 0.00099)""")
+    return con
+
+
+def load_bronze(con, users: pd.DataFrame, tx: pd.DataFrame) -> None:
+    customers = (users.drop(columns=["product_type", "currency", "current_balance"])
+                      .drop_duplicates("customer_id")
+                      .rename(columns={"income": "estimated_monthly_income"})
+                      .assign(last_updated=pd.Timestamp("2026-06-01")))
+    products = users[["customer_id", "product_type", "currency", "current_balance"]].copy()
+    products["product_id"] = [f"PRD-{i}" for i in range(len(products))]
+    products["last_updated"] = pd.Timestamp("2026-06-01")
+    con.register("customers_df", customers)
+    con.register("products_df", products)
+    con.register("tx_df", tx)
+    con.execute("CREATE TABLE bronze.customers AS SELECT * FROM customers_df")
+    con.execute("CREATE TABLE bronze.products AS SELECT * FROM products_df")
+    con.execute("CREATE TABLE bronze.transactions AS SELECT * FROM tx_df")

@@ -2,11 +2,11 @@
 SQL readers against an in-memory DuckDB with the bronze schema, and the full flow
 from the database to the suspicious-metric flags.
 """
-import duckdb
 import pandas as pd
 import pytest
 
-from factories import AS_OF, COUNTRY_CURRENCY, raw_users, transactions
+from factories import (AS_OF, COUNTRY_CURRENCY, bronze_connection, load_bronze, raw_users,
+                       transactions)
 from src.features.customer_features import build_customer_features
 from src.features.sources import load_customers_with_products, load_transactions, load_usd_rates
 from src.features.transaction_behavior import (behavior_windows, profile_feature_names,
@@ -17,32 +17,9 @@ from src.models.customer_clustering import assign_clusters, fit_customer_cluster
 
 @pytest.fixture
 def con():
-    con = duckdb.connect(":memory:")
-    con.execute("CREATE SCHEMA bronze")
-    con.execute("""CREATE TABLE bronze.daily_exchange_rates (date DATE, source_currency VARCHAR,
-                   target_currency VARCHAR, exchange_rate DOUBLE)""")
-    con.execute("""INSERT INTO bronze.daily_exchange_rates VALUES
-                   ('2026-06-16', 'COP', 'USD', 0.00020), ('2026-06-17', 'COP', 'USD', 0.00025),
-                   ('2026-06-17', 'USD', 'MXN', 20.0),    ('2026-06-17', 'ARS', 'USD', 0.001),
-                   ('2026-06-18', 'COP', 'USD', 0.00099)""")
+    con = bronze_connection()
     yield con
     con.close()
-
-
-def load_bronze(con, users: pd.DataFrame, tx: pd.DataFrame) -> None:
-    customers = (users.drop(columns=["product_type", "currency", "current_balance"])
-                      .drop_duplicates("customer_id")
-                      .rename(columns={"income": "estimated_monthly_income"})
-                      .assign(last_updated=pd.Timestamp("2026-06-01")))
-    products = users[["customer_id", "product_type", "currency", "current_balance"]].copy()
-    products["product_id"] = [f"PRD-{i}" for i in range(len(products))]
-    products["last_updated"] = pd.Timestamp("2026-06-01")
-    con.register("customers_df", customers)
-    con.register("products_df", products)
-    con.register("tx_df", tx)
-    con.execute("CREATE TABLE bronze.customers AS SELECT * FROM customers_df")
-    con.execute("CREATE TABLE bronze.products AS SELECT * FROM products_df")
-    con.execute("CREATE TABLE bronze.transactions AS SELECT * FROM tx_df")
 
 
 def test_rates_use_the_latest_day_on_or_before_as_of(con):
