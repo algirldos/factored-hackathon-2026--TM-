@@ -199,6 +199,7 @@ Setup: install Ollama (ollama.com/download), then `ollama pull qwen3.5:4b` and
 
 | Control | What it prevents |
 |---------|------------------|
+| Behavior alerts built from an allow-list (`src/models/behavior_alerts.py`) | The LLM revealing that the customer is profiled by segment, or any internal metric of the clustering model |
 | Permission table in code (`policy.py`) | The LLM running a data tool before identity is verified; tools not in the table never run |
 | Tools scoped to the session's customer | A prompt injection cannot make the agent read another customer's data |
 | Risk computed in code, not by the LLM | Invented or inconsistent risk levels |
@@ -511,6 +512,11 @@ python fraud_agent.py --customer <ID>    # start the chat
 | `AGENTS_TABLE` | | `bronze.service_agents` | Service agents table used for routing |
 | `PUBLIC_URL` | | | Public HTTPS URL of the webhook (ngrok); enables Twilio signature validation |
 | `WHATSAPP_SERVER_PORT` | | `8080` | Port of the WhatsApp webhook |
+| `CASE_CHANNEL` | | `web` | `web`: new cases send an email with a link to the web chat. `whatsapp`: OTP by email + WhatsApp opener |
+| `PUBLIC_WEB_URL` | | `http://localhost:8000` | Public URL of the web chat, used in the emailed links (HTTPS in production) |
+| `LINK_TTL_HOURS` | | `72` | Hours an emailed link stays valid |
+| `WEB_IDLE_TIMEOUT_S`, `WEB_MAX_MESSAGES` | | `300`, `40` | Web session idle timeout and messages per session |
+| `HOST`, `PORT` | | `127.0.0.1`, `8000` | Address of `web_app.py` |
 
 If the email or WhatsApp settings are missing, alerts are **simulated**: everything runs and is
 logged, but nothing is delivered. That is enough for a demo.
@@ -532,17 +538,53 @@ logged, but nothing is delivered. That is enough for a demo.
 Options: `--days N` (analysis window, default 180) and `--channel email|whatsapp|both`
 (for `--monitor`, default `both`).
 
-### Web chat (prototype)
+### Customer web chat (`web_app.py`)
 
-`src/web/chat.html` is the customer-facing chat window: tool name, conversation history and
-message box. It is a static page that still answers with **simulated** replies; it will call the
-agent through an HTTP API in the next phase. To open it:
+The customer reaches the agent from a link emailed when a case is opened. With
+`CASE_CHANNEL=web` (the default), `fraud_flow.py --process-queue` sends that email instead of
+the OTP + WhatsApp opener.
 
 ```bash
-python -m http.server 5178 --directory src/web
+python web_app.py        # serves the chat at PUBLIC_WEB_URL (default http://localhost:8000)
 ```
 
-Then open `http://localhost:5178/chat.html`.
+```mermaid
+sequenceDiagram
+    participant Flow as fraud_flow.py --process-queue
+    actor Customer
+    participant Page as chat.html
+    participant API as web_app.py
+    participant Agent as Verified agent (fraud_flow + policy.py)
+
+    Flow->>Customer: email "Hemos detectado un comportamiento sospechoso..." + link (#t=token)
+    Customer->>Page: opens the link
+    Page->>API: POST /api/sessions {token}
+    API->>Customer: email with the 6-digit code
+    API-->>Page: opening message, session id (memory only)
+    Customer->>Page: types the code
+    Page->>API: POST /api/messages
+    API->>Agent: verify_otp, get_case_details (neutral behavior alert)
+    Agent-->>Page: reply + verified / escalated
+    Customer->>Page: "Quiero hablar con un asesor"
+    Agent->>Agent: escalate_to_agent (staff email with internal detail)
+```
+
+The page shows the tool name, a "Tu caso" panel with three steps (verify identity, review
+activity, decide what to do), the conversation, quick replies and the message box. After
+verification the customer can say whether they recognize the activity, ask what to do, or
+hand the case to an advisor with one button.
+
+| Control | Detail |
+|---------|--------|
+| Link token | 256 random bits, only its SHA-256 is stored (`fraud_ops.case_links`), expires after `LINK_TTL_HOURS` (72), a new link revokes the old one, closed cases do not open |
+| Token never in logs | It travels in the URL fragment (`#t=`), which browsers do not send to the server; the page removes it from the address bar right away |
+| Identity | The OTP is emailed when the link is opened (so it does not expire unread) and the agent's data tools stay locked until it is verified (`policy.py`) |
+| Session | Random id kept in page memory only (no cookies or local storage), idle timeout of 5 minutes on both sides, reopening the link replaces the old session, at most `WEB_MAX_MESSAGES` (40) messages |
+| Input | Full card numbers are masked in the page **and** on the server before reaching the agent; messages over 1,000 characters are rejected |
+| Page | Strict security headers (CSP, `frame-ancestors 'none'`, `no-referrer`, `no-store`), API docs disabled |
+
+To try it without email, keep `DEMO_MODE=1`: the link and the code are printed in the console
+of `fraud_flow.py` and `web_app.py`.
 
 ### Example session
 
@@ -712,6 +754,30 @@ With the default threshold, 295 customers (0.7%) are enqueued. Against `is_fraud
 reference; the model never uses it) precision is 0.7% and recall 3% at that threshold, so the
 threshold and the method must be revisited in the evaluation stage.
 
+### Behavior alerts in the agent
+
+Customers must not learn that they are profiled or grouped by spending pattern. When the
+latest scoring run flags a customer (at least 4 of the 5 metrics), the agent only receives a
+neutral alert, built from an allow-list of fields in `src/models/behavior_alerts.py`:
+
+```json
+{"unusual_activity_detected": true,
+ "message": {"es": "Hemos detectado un comportamiento sospechoso en su actividad bancaria.",
+             "pt": "Detectamos um comportamento suspeito na sua atividade bancária."},
+ "reviewed_period_end": "2026-06-17",
+ "instruction": "Share only this message ... do not mention segments, groups, profiles ..."}
+```
+
+| Who | Where | What they get |
+|-----|-------|---------------|
+| Customer, through the LLM | `assess_fraud_risk` (console chat) and `get_case_details` (verified flow, after the OTP) | The fixed message above, in their language, and a request to review their recent activity |
+| Bank staff | Escalation email (`fraud_flow.escalate`) | Model version, period and which metrics are unusual. Never passes through the LLM |
+
+The cluster, metric names, medians, thresholds and scores never leave the server, so a prompt
+injection cannot make the agent reveal them. Both system prompts also forbid explaining how the
+activity was detected, even if the customer asks. If the scoring tables do not exist, the agent
+works as before without the alert.
+
 ### Data contracts
 
 Every step checks its input and output against a contract in `src/contracts.py`: required
@@ -771,6 +837,8 @@ bronze schema and synthetic data (`test/factories.py`), and the OTP table and LL
 | `test/test_sources.py` | SQL readers on an in-memory DuckDB with the bronze schema, and the full flow from the database to a flagged customer |
 | `test/test_training.py` | Training metadata, notebook-compatible profiles, determinism, no data after `as_of`, save/load round trip, refusal of another scikit-learn version, and the CLI |
 | `test/test_batch_scoring.py` | Only the 5 chosen metrics are scored, a customer whose spending jumps is enqueued, dry runs write nothing, every `fraud_ops` table is written with consistent counts, repeated runs never enqueue twice, and the CLI uses read-only vs write connections |
+| `test/test_behavior_alerts.py` | The latest run is used, alerts only above the threshold, the alert and the tool outputs contain no cluster, metric, median or model detail, the alert appears only after the OTP, staff receive the detail by email, and the agent works without the scoring tables |
+| `test/test_web_app.py` | Emailed links (token in the fragment, only its hash stored, revocation, expiry, closed cases), the session API, nothing revealed before the OTP, wrong and right codes, escalation from the page, card masking on the server, idle expiry, message and code limits, security headers |
 | `test/test_contracts.py` | Each contract rule is detected and named, drop vs raise modes, the 5% limit, and that every pipeline step enforces its contract |
 
 Add a test to `test/` with every new tool, and register the tool in `policy.TOOL_POLICY`:
@@ -829,13 +897,17 @@ add that name at the **start** of the corresponding candidate list.
   are skipped by the amount rule. `daily_exchange_rates` could be used to fill them.
 - **No card actions yet.** Card Support needs lock, unlock and report lost/stolen; today the
   agent only recommends blocking the card and escalates.
-- **Web chat not connected.** `src/web/chat.html` uses simulated replies until the HTTP API exists.
+- **Web chat capacity.** `web_app.py` keeps sessions in memory and answers one message at a time,
+  because the agent shares one DuckDB connection; it is a single-process prototype. Production
+  needs a session store and a connection per worker.
+- **Link and code by the same channel.** The link and the OTP both arrive by email, so whoever
+  controls the mailbox passes both checks. A second channel (SMS, WhatsApp or the bank's app)
+  should deliver the code in production, and the link should live on the bank's own domain so
+  customers can tell it apart from phishing.
 - **Portuguese.** The LLM replies in Portuguese, but alert templates and rule reasons are in Spanish,
   and the dataset has no Portuguese conversations to test with. Portuguese is a challenge requirement.
 - **Evaluation.** `--evaluate` compares rules with `fraud_score` on a balanced sample; there is no
   held-out scenario set, prompt-injection test set or cost-per-resolution metric yet.
-- **Clustering model not used by the agent yet.** The model is trained on the real data and
-  batch scoring writes `fraud_ops`, but the agent's tools do not read those results yet.
 - **Weak clustering signal.** With the default threshold, precision against `is_fraud` is 0.7%
   and recall 3% (see Batch scoring). The 30-day window is noisier than the 12-month profile.
 - **Compute budget.** `--demo-customers` and `--evaluate` scan the full transactions table. On the
@@ -855,6 +927,7 @@ factored-hackathon-2026--TM-/
 ├── policy.py                   # Tool permissions enforced in code (OTP gate, deny by default)
 ├── train_clusters.py           # Trains the clustering model and profiles (see Training)
 ├── score_customers.py          # Scores the last 30 days and writes fraud_ops (see Batch scoring)
+├── web_app.py                  # Customer web chat server (see Customer web chat)
 ├── motherduck_ia.py            # Natural-language SQL assistant (Ollama, Gemini, MotherDuck AI)
 ├── anomalies.example.csv       # Example input from the anomaly model
 ├── demo_recipients.example.csv # Demo recipient per customer (copy to demo_recipients.csv)
@@ -875,7 +948,7 @@ factored-hackathon-2026--TM-/
     ├── features/               # Customer features, transaction behavior, SQL sources
     ├── models/                 # Customer clustering and behavior anomaly scoring
     ├── preprocessing/          # scikit-learn preprocessing pipelines
-    └── web/chat.html           # Customer chat window (prototype, simulated replies)
+    └── web/chat.html           # Customer chat page served by web_app.py
 ```
 
 `motherduck_ia.py` is an exploratory tool for asking free-form questions about any table, with

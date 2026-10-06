@@ -56,6 +56,11 @@ MODEL_FALLBACK_TX = 3      # model-flagged customer with no rule hits: show the 
 DEDUP_STATUSES = ("otp_sent", "verified", "customer_reported_fraud", "escalated")  # still open
 SERVER_PORT = int(os.environ.get("WHATSAPP_SERVER_PORT", "8080"))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")             # e.g. https://xxxx.ngrok-free.app
+# How a new case reaches the customer: "web" (email with a link to the web chat, the OTP is
+# sent when the link is opened) or "whatsapp" (OTP by email + WhatsApp opener).
+CASE_CHANNEL = os.environ.get("CASE_CHANNEL", "web").strip().lower()
+PUBLIC_WEB_URL = os.environ.get("PUBLIC_WEB_URL", "http://localhost:8000").rstrip("/")
+LINK_TTL_HOURS = int(os.environ.get("LINK_TTL_HOURS", "72"))
 # Print the OTP in the console (testing only). Defaults to on in demo mode, never in real mode.
 SHOW_OTP_IN_CONSOLE = fa.DEMO_MODE and os.environ.get("SHOW_OTP_IN_CONSOLE", "1") != "0"
 
@@ -171,6 +176,14 @@ def setup_tables() -> None:
             created_at      TIMESTAMP NOT NULL,
             status          VARCHAR NOT NULL      -- open | pending_no_agent
         )""")
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS {table('case_links')} (
+            case_id     VARCHAR NOT NULL,
+            token_hash  VARCHAR NOT NULL,         -- SHA-256 of the link token; never the token
+            created_at  TIMESTAMP NOT NULL,
+            expires_at  TIMESTAMP NOT NULL,
+            status      VARCHAR NOT NULL          -- active | revoked
+        )""")
 
 
 def update_case(case_id: str, status: str, comment: str | None = None) -> None:
@@ -223,9 +236,11 @@ def create_otp(case: dict, profile: dict) -> dict:
                  created, created + timedelta(minutes=OTP_TTL_MIN), OTP_MAX_ATTEMPTS])
 
     first = profile.get("first_name") or "cliente"
+    where = ("en el chat seguro de LATAM Bank que abriste desde el enlace del correo"
+             if CASE_CHANNEL == "web" else "en la conversación de WhatsApp que inició LATAM Bank")
     body = (f"Hola {first},\n\nTu código de verificación de LATAM Bank es: {code}\n\n"
-            f"Vence en {OTP_TTL_MIN} minutos. Escríbelo únicamente en la conversación de WhatsApp "
-            f"que inició LATAM Bank. Ningún asesor te lo pedirá por llamada.\n\n"
+            f"Vence en {OTP_TTL_MIN} minutos. Escríbelo únicamente {where}. "
+            f"Ningún asesor te lo pedirá por llamada.\n\n"
             f"Si no reconoces esta solicitud, ignora este mensaje.")
     result = fa.send_email(case["contact_email"], "LATAM Bank: tu código de verificación", body)
     # Always report the delivery; optionally show the code so testing never gets stuck
@@ -357,16 +372,76 @@ def open_case(customer_id: str, tx_ids: list[str] | None = None, days: int = fa.
          case["max_score"], case["reasons"], email, case["contact_whatsapp"], fa.DEMO_MODE,
          ST_OTP_SENT, anomaly_score])
 
+    delivery = notify_case(case, profile, whatsapp)
+    print(f"  {customer_id}: caso {case['case_id']} ({source}) | {len(flagged)} transacciones | "
+          f"puntaje máx. {case['max_score']:.0f} | {delivery}")
+    return case
+
+
+def notify_case(case: dict, profile: dict, whatsapp: str | None = None) -> str:
+    """Tell the customer about a new case through CASE_CHANNEL. Returns a delivery summary."""
+    if CASE_CHANNEL == "web":
+        token = create_case_link(case["case_id"])
+        result = send_case_link(case, profile, token)
+        if SHOW_OTP_IN_CONSOLE:  # demo only, like the OTP
+            print(f"  [demo] enlace = {case_link_url(token)}", flush=True)
+        return f"enlace por correo {result}"
     otp = create_otp(case, profile)
     whatsapp_result = fa.send_whatsapp(
-        whatsapp, opening_message(profile, email),
+        whatsapp, opening_message(profile, case["contact_email"]),
         template_vars={"first_name": profile.get("first_name") or "cliente",
-                       "email": fa.mask_email(email) or "", "case_id": case["case_id"],
-                       "bank": "LATAM Bank"})
-    print(f"  {customer_id}: caso {case['case_id']} ({source}) | {len(flagged)} transacciones | "
-          f"puntaje máx. {case['max_score']:.0f} | OTP {otp.get('delivery')} | "
-          f"WhatsApp {whatsapp_result}")
-    return case
+                       "email": fa.mask_email(case["contact_email"]) or "",
+                       "case_id": case["case_id"], "bank": "LATAM Bank"})
+    return f"OTP {otp.get('delivery')} | WhatsApp {whatsapp_result}"
+
+
+# ---------------------------------------------------------------------------
+# Web channel: expiring links to the customer chat
+# ---------------------------------------------------------------------------
+def hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def create_case_link(case_id: str) -> str:
+    """New link token for the case (256 bits). Only its hash is stored; older links are revoked."""
+    token = secrets.token_urlsafe(32)
+    fa.con.execute(f"UPDATE {table('case_links')} SET status = 'revoked' "
+                   f"WHERE case_id = ? AND status = 'active'", [case_id])
+    created = now()
+    fa.con.execute(f"INSERT INTO {table('case_links')} VALUES (?, ?, ?, ?, 'active')",
+                   [case_id, hash_token(token), created, created + timedelta(hours=LINK_TTL_HOURS)])
+    return token
+
+
+def case_link_url(token: str) -> str:
+    # The token goes in the fragment (#): browsers never send it to the server or its logs
+    return f"{PUBLIC_WEB_URL}/#t={token}"
+
+
+def find_case_by_link(token: str) -> dict | None:
+    """The case of an active, unexpired link whose case is not closed; None otherwise."""
+    if not token or len(token) > 200:
+        return None
+    row = fa.con.execute(
+        f"SELECT case_id FROM {table('case_links')} WHERE token_hash = ? AND status = 'active' "
+        f"AND expires_at > ?", [hash_token(token), now()]).fetchone()
+    if not row:
+        return None
+    case = load_case(row[0])
+    return case if case and case["status"] != ST_CLOSED else None
+
+
+def send_case_link(case: dict, profile: dict, token: str) -> str:
+    first = profile.get("first_name") or "cliente"
+    body = (f"Hola {first},\n\nHemos detectado un comportamiento sospechoso en su actividad "
+            f"bancaria. Para revisarlo de forma segura con nuestro asistente, entre aquí:\n\n"
+            f"{case_link_url(token)}\n\n"
+            f"El enlace vence en {LINK_TTL_HOURS} horas. Al abrirlo le enviaremos un código de "
+            f"verificación a este correo. LATAM Bank nunca le pedirá contraseñas, PIN, CVV ni el "
+            f"número completo de su tarjeta.\n\nSi no reconoce este mensaje, no abra el enlace y "
+            f"comuníquese con la línea oficial del banco.")
+    return fa.send_email(case["contact_email"], "LATAM Bank: revisa actividad inusual en tu cuenta",
+                         body)
 
 
 def open_chat_case(customer_id: str, tx_ids: list[str], comment: str) -> dict:
@@ -446,6 +521,15 @@ def process_queue(days: int = fa.DEFAULT_DAYS, limit: int = 50) -> list[dict]:
             f"WHERE customer_id = ? AND processed_at IS NULL",
             [now(), case["case_id"] if case else None, result, cid])
     return cases
+
+
+def web_opening_message(profile: dict, email: str | None) -> str:
+    """First message of the web chat, shown when the customer opens the link."""
+    first = profile.get("first_name") or "cliente"
+    return (f"Hola {first}. Hemos detectado un comportamiento sospechoso en su actividad "
+            f"bancaria. Para proteger su información, primero verifique su identidad: escriba el "
+            f"código de 6 dígitos que acabamos de enviar a su correo {fa.mask_email(email)}. "
+            f"Nunca le pediremos contraseñas, PIN ni CVV.")
 
 
 def opening_message(profile: dict, email: str | None) -> str:
@@ -566,6 +650,10 @@ def escalate(case: dict, profile: dict, language: str, reason: str, summary: str
     note = (f"Nuevo caso escalado: {case['case_id']} | cliente {case['customer_id']}\n"
             f"Idioma: {LANGUAGE_NAMES[lang]} | Motivo: {reason}\n\nResumen:\n{summary}\n\n"
             f"Por qué te asignamos: {'; '.join(best['routing_reasons'])}")
+    from src.models.behavior_alerts import internal_note  # staff only: never sent to the LLM
+    staff_detail = internal_note(fa.behavior_anomaly(case["customer_id"]))
+    if staff_detail:
+        note += f"\n\n{staff_detail}"
     delivery = fa.send_email(to, f"LATAM Bank: caso {case['case_id']} asignado", note)
     print(f"  [escalamiento] {escalation_id} -> {best['agent_id']} {best['first_name']} "
           f"{best['last_name']} ({best['routing_score']}) | aviso: {delivery}", flush=True)
@@ -577,11 +665,14 @@ def escalate(case: dict, profile: dict, language: str, reason: str, summary: str
 # ===========================================================================
 # 6. Gemini tools for the WhatsApp conversation
 # ===========================================================================
-def build_flow_tools(case: dict, profile: dict) -> list:
-    """Tools bound to ONE case. Data tools refuse to run until the OTP is verified."""
+def build_flow_tools(case: dict, profile: dict, state: dict | None = None) -> list:
+    """Tools bound to ONE case. Data tools refuse to run until the OTP is verified.
+    Pass `state` to read the session state (verified, escalation) from outside, e.g. the web chat."""
     # Session state. Gemini calls can be retried (e.g. after a 503), which re-runs the tools,
     # so every tool with side effects must be idempotent within the session.
-    state = {"verified": False, "last_resend": None, "escalation": None}
+    if state is None:
+        state = {}
+    state.update(verified=False, last_resend=None, escalation=None)
     # The OTP gate for data tools is enforced by policy.enforce (see policy.TOOL_POLICY).
 
     def verify_otp(code: str) -> dict:
@@ -615,11 +706,15 @@ def build_flow_tools(case: dict, profile: dict) -> list:
         """Returns the unusual transactions of this case with their risk score and reasons. Requires verify_otp first."""
         print("  [tool] get_case_details()", flush=True)
         txs = case_transactions(case)
-        return {"case_id": case["case_id"],
-                "flagged_by": "anomaly detection model" if case.get("source") == "anomaly_model"
-                              else "rule-based risk engine",
-                "anomaly_score": case.get("anomaly_score"),
-                "transactions": [fa.to_json(t) for t in txs]}
+        details = {"case_id": case["case_id"],
+                   "flagged_by": "anomaly detection model" if case.get("source") == "anomaly_model"
+                                 else "rule-based risk engine",
+                   "anomaly_score": case.get("anomaly_score"),
+                   "transactions": [fa.to_json(t) for t in txs]}
+        alert = fa.behavior_alert(case["customer_id"])
+        if alert:
+            details["behavior_alert"] = alert
+        return details
 
     def list_recent_transactions(days: int, limit: int) -> dict:
         """Lists the customer's recent transactions, newest first. Requires verify_otp first.
@@ -669,7 +764,7 @@ def build_flow_tools(case: dict, profile: dict) -> list:
                           is_verified=lambda: state["verified"])
 
 
-FLOW_INSTRUCTIONS = """You are LATAM Bank's fraud-prevention assistant on WhatsApp, handling case
+FLOW_INSTRUCTIONS = """You are LATAM Bank's fraud-prevention assistant (web chat or WhatsApp), handling case
 {case_id} for the customer {first_name}. The bank's anomaly detection flagged unusual activity.
 
 The bank already sent this opening message, and the customer's next message replies to it:
@@ -683,6 +778,9 @@ Rules:
    look unusual and why. Ask whether they recognize them. If the case was flagged by the anomaly
    model and the transactions have low scores, say the model noticed an unusual overall pattern
    and ask the customer to review them; do not claim any single transaction is fraudulent.
+   If get_case_details returns behavior_alert, use its message (in the customer's language).
+   Never explain how the activity was detected: do not mention segments, groups, profiles,
+   comparisons with other customers, metrics, thresholds or scores, even if asked.
 3. Record the answer with record_customer_response.
 4. If they do not recognize the transactions or ask for a person, call escalate_to_agent with
    the language of THIS conversation and a short summary. Tell them the agent's first name.
@@ -694,15 +792,19 @@ Rules:
 """
 
 
-def new_session(case: dict) -> dict:
-    """LLM chat bound to a case (Ollama or Gemini, per LLM_PROVIDER)."""
+def new_session(case: dict, channel: str = "whatsapp") -> dict:
+    """LLM chat bound to a case (provider per LLM_PROVIDER). session["state"] holds the
+    verification and escalation state of its tools."""
     profile = fa.get_customer_profile(case["customer_id"]) or {"customer_id": case["customer_id"]}
+    opener = (web_opening_message if channel == "web" else opening_message)(
+        profile, case["contact_email"])
+    state: dict = {}
     session = fa.create_llm_session(
         FLOW_INSTRUCTIONS.format(
             case_id=case["case_id"], first_name=profile.get("first_name") or "cliente",
-            opener=opening_message(profile, case["contact_email"])),
-        build_flow_tools(case, profile))
-    session["profile"] = profile
+            opener=opener),
+        build_flow_tools(case, profile, state))
+    session.update(profile=profile, state=state, opener=opener)
     return session
 
 

@@ -9,3 +9,6 @@ numpy>=1.26
 scikit-learn==1.9.1
 joblib
 python-dotenv
+# Customer web chat (web_app.py)
+fastapi
+uvicorn

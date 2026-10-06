@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>Soporte de Tarjetas</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -47,72 +48,56 @@
   .session { margin-left: auto; display: flex; align-items: center; gap: 16px; font-family: var(--mono); font-size: 12px; color: var(--dim); }
   .session .timer { font-variant-numeric: tabular-nums; }
   .session .timer.warn { color: var(--fg); }
+  .session[hidden] { display: none; }
   .ghost {
     border: 1px solid var(--border-strong); background: transparent; border-radius: 6px;
     padding: 6px 12px; font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap;
   }
   .ghost:hover { color: var(--fg); border-color: var(--faint); }
   .ghost[disabled] { opacity: .4; cursor: default; }
-  .history-toggle { display: none; }
+  .case-toggle { display: none; }
 
   /* ---------- Shell ---------- */
-  .shell {
-    display: grid; grid-template-columns: 280px minmax(0, 1fr);
-    height: calc(100dvh - var(--header-h));
-  }
+  .shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); height: calc(100dvh - var(--header-h)); }
 
-  /* History */
-  .history { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; padding: 24px 0 0; }
-  .history-head { padding: 0 20px 16px; }
+  /* Case panel */
+  .case { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; padding: 24px 20px 0; overflow-y: auto; }
   .label { font-family: var(--mono); font-size: 14px; font-weight: 500; text-transform: uppercase; margin: 0 0 14px; }
-  .new-chat {
-    width: 100%; display: flex; align-items: center; justify-content: space-between;
-    background: var(--surface-2); border: 0; border-radius: 6px; padding: 10px 12px;
-    font-family: var(--mono); font-size: 14px; cursor: pointer;
+  .steps { list-style: none; margin: 0 0 24px; padding: 0; counter-reset: step; }
+  .steps li { display: grid; grid-template-columns: 28px 1fr; gap: 2px 10px; padding: 12px 0; border-bottom: 1px solid var(--border); counter-increment: step; }
+  .steps li::before {
+    content: counter(step); grid-row: span 2; width: 22px; height: 22px; border-radius: 50%;
+    border: 1px solid var(--border-strong); color: var(--dim); font-family: var(--mono); font-size: 12px;
+    display: flex; align-items: center; justify-content: center;
   }
-  .new-chat:hover { background: #222; }
-  .new-chat .kbd { font-size: 11px; }
-  .conv-list { list-style: none; margin: 0; padding: 0 12px 16px; overflow-y: auto; flex: 1; scrollbar-width: thin; scrollbar-color: #222 transparent; }
-  .conv-list button {
-    width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
-    padding: 10px 8px; border-radius: 6px; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px;
-  }
-  .conv-list button:hover { background: var(--surface); }
-  .conv-list button[aria-current="true"] { background: var(--surface-2); }
-  .conv-list .t { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .conv-list .h { font-family: var(--mono); font-size: 12px; color: var(--dim); }
-  .conv-list .s { grid-column: 1 / -1; font-family: var(--mono); font-size: 12px; color: var(--dim); }
-  .history-empty { color: var(--dim); font-size: 13px; padding: 4px 8px; margin: 0; }
-  .history-foot { border-top: 1px solid var(--border); padding: 14px 20px; color: var(--dim); font-size: 12px; font-family: var(--mono); line-height: 1.6; }
+  .steps li[data-state="current"]::before { border-color: var(--fg); color: var(--fg); }
+  .steps li[data-state="done"]::before { content: "✓"; background: var(--fg); border-color: var(--fg); color: #000; }
+  .steps .t { font-size: 14px; }
+  .steps li[data-state="pending"] .t { color: var(--dim); }
+  .steps .s { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .case-actions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; }
+  .case-actions button { width: 100%; text-align: left; }
+  .case-foot { margin-top: auto; border-top: 1px solid var(--border); padding: 14px 0; color: var(--dim); font-size: 12px; font-family: var(--mono); line-height: 1.6; }
 
   /* Chat */
   .chat { display: flex; flex-direction: column; min-height: 0; padding: 0 32px; }
   .chat-inner { width: 100%; max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .chat-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px 0 14px; border-bottom: 1px solid var(--border); }
-  .chat-head .label { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-head .label { margin: 0; }
   .verify { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); white-space: nowrap; }
   .verify svg { width: 14px; height: 14px; }
   .verify[data-state="verified"] { color: var(--fg); }
 
   .log { flex: 1; overflow-y: auto; padding: 28px 0 12px; scrollbar-width: thin; scrollbar-color: #222 transparent; }
 
-  /* Empty state: the tool name is the hero */
   .hero { display: flex; flex-direction: column; justify-content: center; min-height: 100%; padding: 24px 0; }
   .wordmark { position: relative; display: inline-block; align-self: flex-start; }
   .wordmark pre { margin: 0; font-family: "Fira Mono", var(--mono); font-size: 13px; line-height: 125%; letter-spacing: -1px; user-select: none; }
   .wordmark .shadow { position: absolute; top: 3px; left: 3px; color: #5a5a5a; }
   .wordmark .face { position: relative; }
   .tagline { font-family: var(--mono); font-size: 14px; text-transform: uppercase; margin: 16px 0 0; }
-  .lede { color: var(--muted); font-size: 18px; line-height: 1.45; max-width: 46ch; margin: 18px 0 32px; }
-  .starters { display: flex; flex-wrap: wrap; gap: 8px; }
-  .starters button {
-    background: var(--surface-2); border: 0; border-radius: 6px; padding: 9px 12px; cursor: pointer;
-    font-family: var(--mono); font-size: 13px; color: var(--fg);
-  }
-  .starters button:hover { background: #222; }
-  .starters .p { color: var(--muted); margin-right: 1ch; }
+  .lede { color: var(--muted); font-size: 18px; line-height: 1.45; max-width: 46ch; margin: 18px 0 0; }
 
-  /* Messages */
   .msg { margin-bottom: 26px; }
   .meta { font-family: var(--mono); font-size: 12px; color: var(--dim); margin-bottom: 6px; display: flex; gap: 2ch; }
   .msg.bot .body { max-width: 66ch; }
@@ -121,34 +106,17 @@
   .msg.user { display: flex; flex-direction: column; align-items: flex-end; }
   .msg.user .body { background: var(--surface-2); border-radius: 6px; padding: 10px 14px; max-width: min(60ch, 85%); white-space: pre-wrap; overflow-wrap: anywhere; }
   .msg.system { text-align: center; font-family: var(--mono); font-size: 12px; color: var(--dim); border-top: 1px solid var(--border); padding-top: 10px; }
-  .block { margin-top: 14px; }
   .typing { font-family: var(--mono); font-size: 14px; color: var(--muted); }
   .cursor { display: inline-block; width: .6em; height: 1.05em; background: var(--fg); vertical-align: -2px; margin-left: 4px; animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
 
-  .board { width: 100%; border-collapse: collapse; font-size: 14px; }
-  .board th { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--dim); text-transform: uppercase; text-align: left; padding: 0 12px 10px 0; border-bottom: 1px solid var(--border); }
-  .board td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
-  .board .mono { font-family: var(--mono); white-space: nowrap; }
-  .board .amt { text-align: right; padding-right: 0; }
-  .board .why { color: var(--muted); font-size: 13px; }
+  .starters { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 12px; }
+  .starters:empty { display: none; }
+  .starters button { background: var(--surface-2); border: 0; border-radius: 6px; padding: 8px 12px; cursor: pointer; font-family: var(--mono); font-size: 13px; color: var(--fg); }
+  .starters button:hover { background: #222; }
+  .starters button[disabled] { opacity: .4; cursor: default; }
+  .starters .p { color: var(--muted); margin-right: 1ch; }
 
-  .panel { border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; max-width: 480px; }
-  .panel dl { margin: 0; padding: 4px 16px; }
-  .panel dl div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
-  .panel dl div:last-child { border-bottom: 0; }
-  .panel dt { color: var(--muted); }
-  .panel dd { margin: 0; font-family: var(--mono); text-align: right; }
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border); }
-  .actions.bare { padding: 0; background: none; border: 0; margin-top: 14px; }
-  .btn { border: 0; border-radius: 6px; padding: 8px 14px; font-size: 14px; font-weight: 500; cursor: pointer; background: var(--fg); color: #000; }
-  .btn:hover { background: #fff; }
-  .btn[disabled] { opacity: .4; cursor: default; }
-
-  .cmdbox { display: flex; align-items: center; gap: 12px; background: var(--surface-2); border-radius: 6px; padding: 12px 14px; font-family: var(--mono); font-size: 14px; max-width: 480px; }
-  .cmdbox .p { color: var(--muted); }
-
-  /* Composer */
   .composer-wrap { padding-bottom: 20px; }
   .notice { font-family: var(--mono); font-size: 12px; color: var(--fg); background: var(--surface-2); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; display: none; }
   .notice.show { display: block; }
@@ -157,26 +125,27 @@
   .composer .p { font-family: var(--mono); color: var(--muted); line-height: 24px; }
   .composer textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; font-size: 15px; line-height: 24px; max-height: 144px; padding: 0; }
   .composer textarea::placeholder { color: var(--dim); font-family: var(--mono); font-size: 14px; }
+  .composer textarea:disabled { opacity: .5; }
   .kbd { font-family: var(--mono); font-size: 12px; color: var(--muted); border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 7px; line-height: 20px; }
+  .btn { border: 0; border-radius: 6px; padding: 8px 14px; font-size: 14px; font-weight: 500; cursor: pointer; background: var(--fg); color: #000; }
+  .btn:hover { background: #fff; }
+  .btn[disabled] { opacity: .4; cursor: default; }
   .fine { font-size: 12px; color: var(--dim); margin: 10px 0 0; }
 
-  /* ---------- Responsive ---------- */
   @media (max-width: 900px) {
     .top { padding: 0 16px; gap: 10px; }
     .crumb .bank, .crumb .sep.first { display: none; }
     .session .timer-label { display: none; }
-    .history-toggle { display: inline-flex; }
+    .case-toggle { display: inline-flex; }
     .shell { grid-template-columns: minmax(0, 1fr); }
-    .history { display: none; }
-    .shell.show-history .history { display: flex; position: fixed; inset: var(--header-h) 0 0 0; background: var(--bg); z-index: 5; border-right: 0; }
+    .case { display: none; }
+    .shell.show-case .case { display: flex; position: fixed; inset: var(--header-h) 0 0 0; background: var(--bg); z-index: 5; border-right: 0; padding: 24px 16px 0; }
     .chat { padding: 0 16px; }
     .composer .kbd { display: none; }
     .wordmark pre { font-size: 7.5px; }
     .lede { font-size: 16px; }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .cursor { animation: none; }
-  }
+  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
 </style>
 </head>
 <body>
@@ -189,26 +158,31 @@
     <span class="sep" aria-hidden="true">/</span>
     <span class="tool">Soporte de Tarjetas</span>
   </div>
-  <div class="session" aria-live="polite">
+  <div class="session" id="sessionInfo" aria-live="polite" hidden>
     <span><span class="timer-label">La sesión se cierra en </span><span class="timer" id="timer">5:00</span></span>
   </div>
-  <button class="ghost history-toggle" id="historyToggle" aria-expanded="false" aria-controls="history">Historial</button>
+  <button class="ghost case-toggle" id="caseToggle" aria-expanded="false" aria-controls="casePanel">Tu caso</button>
 </header>
 
 <div class="shell" id="shell">
-  <aside class="history" id="history" aria-label="Historial de conversaciones">
-    <div class="history-head">
-      <h2 class="label">Historial</h2>
-      <button class="new-chat" id="newChat">Nueva conversación <span class="kbd" aria-hidden="true">N</span></button>
+  <aside class="case" id="casePanel" aria-label="Tu caso">
+    <h2 class="label">Tu caso</h2>
+    <ol class="steps" id="steps">
+      <li data-step="verify" data-state="current"><span class="t">Verifica tu identidad</span><span class="s" id="stepVerify">Código enviado a tu correo</span></li>
+      <li data-step="review" data-state="pending"><span class="t">Revisa tu actividad</span><span class="s" id="stepReview">Después de verificar</span></li>
+      <li data-step="decide" data-state="pending"><span class="t">Decide qué hacer</span><span class="s" id="stepDecide">Resolver aquí o con un asesor</span></li>
+    </ol>
+    <div class="case-actions">
+      <button class="ghost" id="askAdvisor" disabled>Hablar con un asesor</button>
+      <button class="ghost" id="endSession" disabled>Cerrar sesión</button>
     </div>
-    <ul class="conv-list" id="convList"></ul>
-    <div class="history-foot">El historial solo existe mientras la sesión está abierta. Al cerrarla se borra de este dispositivo.</div>
+    <div class="case-foot">Esta conversación no se guarda en tu dispositivo. Se cierra tras 5 minutos sin actividad.</div>
   </aside>
 
   <main class="chat">
     <div class="chat-inner">
       <div class="chat-head">
-        <h1 class="label" id="convTitle">Nueva conversación</h1>
+        <h1 class="label">Conversación</h1>
         <span class="verify" id="verify" data-state="unverified">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
           <span id="verifyText">Identidad sin verificar</span>
@@ -218,13 +192,14 @@
       <div class="log" id="log" role="log" aria-live="polite"></div>
 
       <div class="composer-wrap">
+        <div class="starters" id="starters" aria-label="Respuestas rápidas"></div>
         <div class="notice" id="notice" role="status"></div>
         <form class="composer" id="form">
           <span class="p" aria-hidden="true">$</span>
           <label for="input" class="sr">Escribe tu mensaje</label>
-          <textarea id="input" rows="1" maxlength="1000" placeholder="Escribe tu consulta sobre tus tarjetas" autocomplete="off"></textarea>
+          <textarea id="input" rows="1" maxlength="1000" placeholder="Escribe aquí" autocomplete="off" disabled></textarea>
           <span class="kbd" aria-hidden="true">/</span>
-          <button class="btn" type="submit">Enviar</button>
+          <button class="btn" type="submit" id="sendBtn" disabled>Enviar</button>
         </form>
         <p class="fine">LATAM Bank nunca te pedirá tu PIN, CVV, contraseñas ni el número completo de tu tarjeta.</p>
       </div>
@@ -250,237 +225,111 @@ function wordmark(word) {
 }
 
 /* =====================================================================
-   Security layer (client side). The real checks live in the backend
-   (policy.py, OTP in fraud_flow.py); these only avoid leaking data on screen.
+   API client. The link token is read once from the URL fragment and the
+   session id lives only in memory: nothing is stored on the device.
    ===================================================================== */
-const IDLE_LIMIT_S = 5 * 60;
-const OTP_MAX_ATTEMPTS = 3;
+const api = {
+  sid: null,
+  async call(method, path, body) {
+    const res = await fetch(path, {
+      method, headers: { "Content-Type": "application/json", ...(this.sid ? { "X-Session-Id": this.sid } : {}) },
+      body: body ? JSON.stringify(body) : undefined, credentials: "same-origin", cache: "no-store",
+      keepalive: method === "DELETE",
+    });
+    let data = {};
+    try { data = await res.json(); } catch (_) {}
+    if (!res.ok) throw Object.assign(new Error(data.error || "No pudimos procesar tu solicitud."), { status: res.status });
+    return data;
+  },
+  start(token) { return this.call("POST", "/api/sessions", { token }); },
+  send(text) { return this.call("POST", "/api/messages", { text }); },
+  end() { if (this.sid) this.call("DELETE", "/api/sessions").catch(() => {}); this.sid = null; },
+};
+
+/* =====================================================================
+   Client-side protections (the server repeats them)
+   ===================================================================== */
 const CARD_RE = /\b(?:\d[ -]?){12,18}\d\b/g;
 const SECRET_RE = /\b(pin|cvv|cvc|contrase(n|ñ)a|clave|password|senha)\b/i;
-
+const OTP_RE = /^\s*\d{6}\s*$/;
 function sanitize(text) {
   let masked = false;
   const clean = text.replace(CARD_RE, m => { masked = true; return "•••• " + m.replace(/\D/g, "").slice(-4); });
   return { clean, masked, mentionsSecret: SECRET_RE.test(text) };
 }
 const esc = s => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
-/* =====================================================================
-   Session state: memory only, never localStorage (banking data)
-   ===================================================================== */
-const session = { verified: false, otpAttempts: 0, otpLocked: false, conversations: [], activeId: null };
-const DEMO_OTP = "482913";
-const fmt = n => new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n);
+const paragraphs = text => text.split(/\n{2,}/).map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
 const clock = d => d.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false });
 
-/* Demo data: will come from the agent API */
-const CARDS = [
-  { id: "visa", name: "Visa Crédito", last4: "7740", status: "Activa" },
-  { id: "debit", name: "Débito Mastercard", last4: "4821", status: "Activa" },
-];
-const SUSPICIOUS = [
-  { when: "04 oct 03:02", merchant: "ELECTROSHOP MIAMI", amount: 3_960_000, score: 92, why: "Monto 12 veces tu promedio, país nuevo y hora inusual" },
-  { when: "04 oct 03:01", merchant: "ELECTROSHOP MIAMI", amount: 3_750_000, score: 81, why: "Dos intentos rechazados justo antes" },
-];
-const DECLINED = { when: "02 oct 19:44", merchant: "Rappi", amount: 61_200, code: "51", reason: "Fondos o cupo insuficiente en ese momento" };
-
-function activeConv() { return session.conversations.find(c => c.id === session.activeId); }
-
-function newConversation() {
-  const conv = { id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()), title: null, started: new Date(),
-                 messages: [], pending: null, status: "Abierta" };
-  session.conversations.unshift(conv);
-  session.activeId = conv.id;
-  renderAll();
-  input.focus();
-}
-
 /* =====================================================================
-   Agent adapter. Replace `reply` with a call to the HTTP API
-   (POST /chat) when it exists; the UI only consumes {html, actions}.
+   State and rendering
    ===================================================================== */
-const SENSITIVE = ["unrecognized", "lock", "declined", "status", "lost"];
-
-function intentOf(text) {
-  const t = text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-  if (/ignora|ignore|instrucciones|system prompt|otro cliente|cli-\w+|admin/.test(t)) return "injection";
-  if (/^\s*\d{6}\s*$/.test(t)) return "otp";
-  if (/perdi|robaron|robo|extravi/.test(t)) return "lost";
-  if (/no reconozco|no fui yo|cobro|cargo|fraude|sospech/.test(t)) return "unrecognized";
-  if (/desbloque/.test(t)) return "unlock";
-  if (/bloque|congel|apaga/.test(t)) return "lock";
-  if (/rechaz|declin|no pas|no me dej/.test(t)) return "declined";
-  if (/estado|mis tarjetas|que tarjetas|activa/.test(t)) return "status";
-  if (/asesor|humano|persona|agente/.test(t)) return "human";
-  if (/saldo|transfer|credito|prestamo|cuenta de ahorro|disputa|cdt|inversion/.test(t)) return "out_of_scope";
-  if (/hola|buen|ayuda|que puedes/.test(t)) return "help";
-  return "unclear";
-}
-
-function otpPrompt() {
-  return { html: `<p>Antes de mostrarte información de tus tarjetas necesito verificar tu identidad. Te envié un código de 6 dígitos a tu correo a•••@gmail.com. Escríbelo aquí.</p>
-    <div class="block cmdbox"><span class="p">demo</span>código ${DEMO_OTP}</div>`,
-    actions: [{ label: "Enviar un código nuevo", act: "resend" }] };
-}
-
-const HANDLERS = {
-  help: () => ({ html: `<p>Puedo ayudarte con tus tarjetas: revisar cobros que no reconoces, bloquear o desbloquear una tarjeta, explicar por qué rechazaron una compra y reportar una tarjeta perdida o robada.</p><p>Para cualquier otra consulta te comunico con un asesor.</p>` }),
-  unrecognized: () => ({ html: `<p>Revisé los últimos 180 días de tu Visa Crédito ••7740. Estas dos transacciones no se parecen a tus hábitos:</p>
-    <div class="block"><table class="board"><thead><tr><th>Fecha</th><th>Comercio</th><th class="amt">Monto</th></tr></thead><tbody>
-    ${SUSPICIOUS.map(s => `<tr><td class="mono">${s.when}</td><td>${s.merchant}<div class="why">${s.why}</div></td><td class="mono amt">${fmt(s.amount)}</td></tr>`).join("")}
-    </tbody></table></div><p style="margin-top:14px">¿Las reconoces?</p>`,
-    actions: [{ label: "No fui yo", act: "not_me", primary: true }, { label: "Sí las reconozco", act: "legit" }] }),
-  lock: () => lockConfirm("Bloquear tu Visa Crédito ••7740 rechaza toda compra nueva hasta que la desbloquees. Los pagos automáticos también fallarán."),
-  unlock: () => ({ html: `<p>Tu Visa Crédito ••7740 ${CARDS[0].status === "Bloqueada temporalmente" ? "está bloqueada temporalmente. ¿La desbloqueo?" : "no está bloqueada, así que no hay nada que desbloquear."}</p>`,
-    actions: CARDS[0].status === "Bloqueada temporalmente" ? [{ label: "Desbloquear tarjeta", act: "do_unlock", primary: true }, { label: "Cancelar", act: "cancel" }] : [] }),
-  declined: () => ({ html: `<p>La compra que rechazamos fue esta:</p>
-    <div class="block panel"><dl>
-      <div><dt>Fecha</dt><dd>${DECLINED.when}</dd></div><div><dt>Comercio</dt><dd>${DECLINED.merchant}</dd></div>
-      <div><dt>Monto</dt><dd>${fmt(DECLINED.amount)}</dd></div><div><dt>Código</dt><dd>${DECLINED.code}</dd></div></dl></div>
-    <p style="margin-top:14px">Motivo: ${DECLINED.reason}. No fue un bloqueo por seguridad, así que puedes intentarlo de nuevo.</p>` }),
-  status: () => ({ html: `<p>Estas son tus tarjetas:</p><div class="block"><table class="board"><thead><tr><th>Tarjeta</th><th>Número</th><th class="amt">Estado</th></tr></thead><tbody>
-    ${CARDS.map(c => `<tr><td>${c.name}</td><td class="mono">••${c.last4}</td><td class="amt">${c.status}</td></tr>`).join("")}</tbody></table></div>` }),
-  lost: () => lockConfirm("Si perdiste tu tarjeta o te la robaron, primero la bloqueo para que nadie pueda usarla. Después te comunico con un asesor para la reposición.", true),
-  human: () => handoff("El cliente pidió hablar con un asesor."),
-  out_of_scope: () => ({ html: `<p>Esa consulta no la puedo resolver en este canal, que solo atiende tarjetas. Un asesor puede ayudarte con saldos, transferencias, créditos o disputas.</p>`,
-    actions: [{ label: "Hablar con un asesor", act: "human", primary: true }] }),
-  injection: () => ({ html: `<p>Solo puedo consultar las tarjetas de la persona verificada en esta sesión y no puedo cambiar mis reglas de seguridad. ¿Te ayudo con alguna de tus tarjetas?</p>` }),
-  unclear: () => ({ html: `<p>No estoy seguro de qué necesitas. ¿Es sobre un cobro que no reconoces, bloquear tu tarjeta, una compra rechazada o una tarjeta perdida?</p>` }),
-};
-
-function lockConfirm(text, thenHandoff = false) {
-  return { html: `<p>${text}</p><div class="block panel"><dl>
-      <div><dt>Tarjeta</dt><dd>Visa Crédito ••7740</dd></div><div><dt>Estado actual</dt><dd>${CARDS[0].status}</dd></div>
-      <div><dt>Nuevo estado</dt><dd>Bloqueada temporalmente</dd></div></dl></div>`,
-    actions: [{ label: "Bloquear tarjeta", act: thenHandoff ? "do_lock_handoff" : "do_lock", primary: true }, { label: "Cancelar", act: "cancel" }] };
-}
-
-function handoff(reason) {
-  const conv = activeConv();
-  conv.status = "Con asesor";
-  return { html: `<p>Te comuniqué con Luz Rojas, especialista en tarjetas. Te escribirá por este chat en los próximos minutos. Le compartí solo los datos verificados del caso:</p>
-    <div class="block panel"><dl>
-      <div><dt>Caso</dt><dd>TJ-${conv.id.slice(0, 6).toUpperCase()}</dd></div>
-      <div><dt>Motivo</dt><dd>${esc(reason)}</dd></div>
-      <div><dt>Identidad</dt><dd>${session.verified ? "Verificada con OTP" : "Sin verificar"}</dd></div>
-      <div><dt>Tarjeta</dt><dd>Visa Crédito ••7740 (${CARDS[0].status})</dd></div></dl></div>` };
-}
-
-function reply(conv, text) {
-  let intent = intentOf(text);
-
-  if (intent === "otp") {
-    if (session.verified) return { html: `<p>Tu identidad ya está verificada en esta sesión.</p>` };
-    if (session.otpLocked) return { html: `<p>El código está bloqueado por demasiados intentos. Solicita uno nuevo.</p>`, actions: [{ label: "Enviar un código nuevo", act: "resend" }] };
-    if (text.trim() !== DEMO_OTP) {
-      session.otpAttempts++;
-      if (session.otpAttempts >= OTP_MAX_ATTEMPTS) {
-        session.otpLocked = true;
-        return { html: `<p>El código no coincide y alcanzaste el límite de ${OTP_MAX_ATTEMPTS} intentos. Por seguridad lo bloqueé.</p>`, actions: [{ label: "Enviar un código nuevo", act: "resend" }, { label: "Hablar con un asesor", act: "human" }] };
-      }
-      return { html: `<p>El código no coincide. Te quedan ${OTP_MAX_ATTEMPTS - session.otpAttempts} intentos.</p>` };
-    }
-    session.verified = true;
-    renderVerify();
-    const pending = conv.pending; conv.pending = null;
-    const next = pending ? HANDLERS[pending]() : { html: `<p>¿En qué te ayudo con tus tarjetas?</p>` };
-    return { html: `<p>Identidad verificada.</p>${next.html}`, actions: next.actions };
-  }
-
-  if (SENSITIVE.includes(intent) && !session.verified) { conv.pending = intent; return otpPrompt(); }
-  return HANDLERS[intent]();
-}
-
-function act(conv, action) {
-  switch (action) {
-    case "resend":
-      session.otpAttempts = 0; session.otpLocked = false;
-      return { html: `<p>Te envié un código nuevo. El anterior ya no sirve.</p><div class="block cmdbox"><span class="p">demo</span>código ${DEMO_OTP}</div>` };
-    case "not_me": return lockConfirm("Entiendo. Lo más seguro es bloquear la tarjeta ahora y pasar el caso a un asesor para disputar los cobros.", true);
-    case "legit": return { html: `<p>Gracias por confirmarlo. Registré que reconoces estas compras y no haré cambios en tu tarjeta.</p>` };
-    case "do_lock":
-    case "do_lock_handoff": {
-      CARDS[0].status = "Bloqueada temporalmente";
-      const verifiedAt = clock(new Date());
-      const done = { html: `<p>Listo. Consulté de nuevo el estado de tu tarjeta para confirmar el cambio:</p>
-        <div class="block panel"><dl><div><dt>Visa Crédito ••7740</dt><dd>${CARDS[0].status}</dd></div><div><dt>Comprobado a las</dt><dd>${verifiedAt}</dd></div></dl></div>` };
-      if (action === "do_lock") return done;
-      const h = handoff("Tarjeta bloqueada por cobros no reconocidos o pérdida; requiere disputa o reposición.");
-      return { html: done.html + h.html };
-    }
-    case "do_unlock":
-      CARDS[0].status = "Activa";
-      return { html: `<p>Tu Visa Crédito ••7740 está activa de nuevo. Lo comprobé a las ${clock(new Date())}.</p>` };
-    case "human": return handoff("El cliente pidió hablar con un asesor.");
-    case "cancel": return { html: `<p>Cancelado. No hice ningún cambio.</p>` };
-  }
-}
-
-/* =====================================================================
-   Rendering
-   ===================================================================== */
+const state = { phase: "loading", verified: false, escalated: false, busy: false, idleLimit: 300 };
 const log = document.getElementById("log");
 const input = document.getElementById("input");
 const notice = document.getElementById("notice");
+const startersEl = document.getElementById("starters");
 
-function renderVerify() {
-  const v = document.getElementById("verify");
-  v.dataset.state = session.verified ? "verified" : "unverified";
-  document.getElementById("verifyText").textContent = session.verified ? "Identidad verificada" : "Identidad sin verificar";
+function hero(lede) {
+  const wm = wordmark("TARJETAS");
+  log.innerHTML = `<section class="hero">
+    <div class="wordmark" aria-hidden="true"><pre class="shadow">${wm.shadow}</pre><pre class="face">${wm.face}</pre></div>
+    <p class="sr">Tarjetas</p>
+    <p class="tagline">Soporte de tarjetas LATAM Bank</p>
+    <p class="lede">${esc(lede)}</p></section>`;
 }
 
-function renderHistory() {
-  const list = document.getElementById("convList");
-  const used = session.conversations.filter(c => c.messages.length);
-  list.innerHTML = used.length ? used.map(c => `
-    <li><button data-conv="${c.id}" aria-current="${c.id === session.activeId}">
-      <span class="t">${esc(c.title || "Nueva conversación")}</span><span class="h">${clock(c.started)}</span>
-      <span class="s">${c.status}</span>
-    </button></li>`).join("")
-    : `<li><p class="history-empty">Tus conversaciones de esta sesión aparecerán aquí.</p></li>`;
+function addMessage(who, html) {
+  if (log.querySelector(".hero")) log.innerHTML = "";
+  const el = document.createElement("div");
+  el.className = `msg ${who}`;
+  el.innerHTML = who === "system" ? html
+    : `<div class="meta"><span>${who === "bot" ? "asistente" : "tú"}</span><span>${clock(new Date())}</span></div><div class="body">${html}</div>`;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
 }
 
-function renderLog() {
-  const conv = activeConv();
-  document.getElementById("convTitle").textContent = conv.title || "Nueva conversación";
-  if (!conv.messages.length) {
-    const wm = wordmark("TARJETAS");
-    log.innerHTML = `<section class="hero">
-      <div class="wordmark" aria-hidden="true"><pre class="shadow">${wm.shadow}</pre><pre class="face">${wm.face}</pre></div>
-      <p class="sr">Tarjetas</p>
-      <p class="tagline">Soporte de tarjetas LATAM Bank</p>
-      <p class="lede">Revisa cobros que no reconoces, bloquea tu tarjeta o entiende por qué rechazaron una compra. Verificamos tu identidad antes de mostrar cualquier dato.</p>
-      <div class="starters">${["No reconozco un cobro", "Bloquear mi tarjeta", "¿Por qué rechazaron mi compra?", "Perdí mi tarjeta"]
-        .map(s => `<button data-send="${s}"><span class="p">$</span>${s}</button>`).join("")}</div>
-    </section>`;
-    return;
-  }
-  log.innerHTML = conv.messages.map(m => {
-    if (m.who === "system") return `<div class="msg system">${esc(m.text)}</div>`;
-    const body = m.who === "user" ? esc(m.text) : m.html;
-    const actions = m.actions && m.actions.length
-      ? `<div class="actions bare">${m.actions.map((a, i) => `<button class="${a.primary ? "btn" : "ghost"}" data-act="${a.act}" data-msg="${m.id}" ${m.done ? "disabled" : ""}>${a.label}</button>`).join("")}</div>` : "";
-    return `<div class="msg ${m.who}"><div class="meta"><span>${m.who === "bot" ? "asistente" : "tú"}</span><span>${clock(m.at)}</span></div><div class="body">${body}${actions}</div></div>`;
-  }).join("");
+function typing(on) {
+  const existing = log.querySelector(".msg.typing-msg");
+  if (!on) { existing?.remove(); return; }
+  if (existing) return;
+  const el = document.createElement("div");
+  el.className = "msg bot typing-msg";
+  el.innerHTML = `<div class="meta"><span>asistente</span></div><div class="typing">escribiendo<span class="cursor"></span></div>`;
+  log.appendChild(el);
   log.scrollTop = log.scrollHeight;
 }
 
-function renderAll() { renderHistory(); renderLog(); renderVerify(); }
+function setStep(name, stepState, text) {
+  const li = document.querySelector(`[data-step="${name}"]`);
+  li.dataset.state = stepState;
+  if (text) li.querySelector(".s").textContent = text;
+}
 
-let msgSeq = 0;
-function push(conv, msg) { conv.messages.push({ id: ++msgSeq, at: new Date(), ...msg }); }
+const STARTERS_UNVERIFIED = ["Envíame un código nuevo"];
+const STARTERS_VERIFIED = ["No reconozco estas transacciones", "Sí, fui yo", "¿Qué me recomiendan hacer?", "Quiero hablar con un asesor"];
 
-function botTurn(conv, produce) {
-  const t = document.createElement("div");
-  t.className = "msg bot";
-  t.innerHTML = `<div class="meta"><span>asistente</span></div><div class="typing">consultando<span class="cursor"></span></div>`;
-  log.appendChild(t); log.scrollTop = log.scrollHeight;
-  setTimeout(() => {
-    const r = produce();
-    push(conv, { who: "bot", html: r.html, actions: r.actions });
-    if (conv.id === session.activeId) renderLog();
-    renderHistory();
-  }, 600 + Math.random() * 400);
+function render() {
+  const active = state.phase === "active";
+  input.disabled = !active || state.busy;
+  document.getElementById("sendBtn").disabled = !active || state.busy;
+  document.getElementById("endSession").disabled = !active;
+  document.getElementById("askAdvisor").disabled = !active || !state.verified || state.escalated || state.busy;
+  document.getElementById("sessionInfo").hidden = !active;
+
+  const v = document.getElementById("verify");
+  v.dataset.state = state.verified ? "verified" : "unverified";
+  document.getElementById("verifyText").textContent = state.verified ? "Identidad verificada" : "Identidad sin verificar";
+
+  if (state.verified) {
+    setStep("verify", "done", "Verificada");
+    setStep("review", state.escalated ? "done" : "current", state.escalated ? "Revisada" : "Con el asistente");
+  }
+  if (state.escalated) setStep("decide", "done", state.agentName ? `Con ${state.agentName}, del equipo de asesores` : "Con el equipo de asesores");
+
+  const list = !active || state.escalated ? [] : state.verified ? STARTERS_VERIFIED : STARTERS_UNVERIFIED;
+  startersEl.innerHTML = list.map(s => `<button data-send="${esc(s)}" ${state.busy ? "disabled" : ""}><span class="p">$</span>${esc(s)}</button>`).join("");
 }
 
 function showNotice(text) {
@@ -488,18 +337,74 @@ function showNotice(text) {
   clearTimeout(showNotice.t); showNotice.t = setTimeout(() => notice.classList.remove("show"), 7000);
 }
 
-function send(raw) {
+function applyStatus(data) {
+  const wasEscalated = state.escalated;
+  state.verified = !!data.verified;
+  state.escalated = !!data.escalated;
+  state.agentName = data.agent_first_name || state.agentName;
+  if (state.escalated && !wasEscalated) {
+    addMessage("system", esc(state.agentName
+      ? `Tu caso quedó asignado a ${state.agentName}, del equipo de asesores del banco. Te contactará pronto.`
+      : "Tu caso quedó en manos del equipo de asesores del banco. Te contactarán pronto."));
+  }
+}
+
+/* =====================================================================
+   Flow
+   ===================================================================== */
+async function start() {
+  const token = new URLSearchParams(location.hash.slice(1)).get("t");
+  history.replaceState(null, "", location.pathname);           // the token leaves the address bar
+  if (!token) {
+    state.phase = "no-link";
+    hero("Para revisar tu caso abre el enlace que te enviamos por correo. Si no recibiste ninguno, no necesitas hacer nada.");
+    return render();
+  }
+  hero("Verificando tu enlace…");
+  try {
+    const data = await api.start(token);
+    api.sid = data.session_id;
+    state.phase = "active";
+    state.idleLimit = data.idle_timeout_s || 300;
+    addMessage("bot", paragraphs(data.opening_message));
+    applyStatus(data);
+    resetIdle();
+    input.focus();
+  } catch (e) {
+    state.phase = "error";
+    hero(e.message);
+  }
+  render();
+}
+
+async function send(raw) {
   const text = raw.trim();
-  if (!text) return;
-  const conv = activeConv();
+  if (!text || state.phase !== "active" || state.busy) return;
   const { clean, masked, mentionsSecret } = sanitize(text);
   if (masked) showNotice("Ocultamos el número de tarjeta que escribiste. Solo necesitamos los últimos 4 dígitos.");
   else if (mentionsSecret) showNotice("Recuerda: nunca compartas tu PIN, CVV ni contraseñas, tampoco con nosotros.");
-  const isOtp = /^\s*\d{6}\s*$/.test(clean);
-  push(conv, { who: "user", text: isOtp ? "••••••" : clean });  // the code is never kept in the history
-  if (!conv.title && !isOtp) conv.title = clean.length > 40 ? clean.slice(0, 40) + "…" : clean;
-  renderAll();
-  botTurn(conv, () => reply(conv, clean));
+  addMessage("user", esc(OTP_RE.test(clean) ? "••••••" : clean));   // the code is never shown back
+  state.busy = true; render(); typing(true);
+  try {
+    const data = await api.send(clean);
+    typing(false);
+    addMessage("bot", paragraphs(data.reply));
+    applyStatus(data);
+  } catch (e) {
+    typing(false);
+    addMessage("system", esc(e.message));
+    if (e.status === 401) endSession(false);
+  }
+  state.busy = false; render(); input.focus();
+}
+
+function endSession(byUser) {
+  api.end();
+  state.phase = "ended";
+  log.innerHTML = "";
+  hero(byUser ? "Cerraste la sesión. Para continuar, abre de nuevo el enlace del correo."
+              : "Cerramos tu sesión por inactividad y borramos la conversación de este dispositivo. Para continuar, abre de nuevo el enlace del correo.");
+  render();
 }
 
 /* =====================================================================
@@ -510,61 +415,43 @@ function autosize() { input.style.height = "auto"; input.style.height = Math.min
 input.addEventListener("input", autosize);
 input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
 form.addEventListener("submit", e => { e.preventDefault(); const v = input.value; input.value = ""; autosize(); send(v); });
-
 document.addEventListener("click", e => {
   const s = e.target.closest("[data-send]");
-  if (s) return send(s.dataset.send);
-  const a = e.target.closest("[data-act]");
-  if (a) {
-    const conv = activeConv();
-    const msg = conv.messages.find(m => m.id === +a.dataset.msg);
-    if (msg) msg.done = true;  // each set of buttons can be used once
-    push(conv, { who: "user", text: a.textContent });
-    renderAll();
-    return botTurn(conv, () => act(conv, a.dataset.act));
-  }
-  const c = e.target.closest("[data-conv]");
-  if (c) { session.activeId = c.dataset.conv; closeHistory(); renderAll(); }
+  if (s) { closeCase(); send(s.dataset.send); }
 });
-
-document.getElementById("newChat").addEventListener("click", () => { closeHistory(); newConversation(); });
+document.getElementById("askAdvisor").addEventListener("click", () => { closeCase(); send("Quiero hablar con un asesor"); });
+document.getElementById("endSession").addEventListener("click", () => { closeCase(); endSession(true); });
 document.addEventListener("keydown", e => {
-  const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName);
-  if (e.key === "/" && !typing) { e.preventDefault(); input.focus(); }
-  if (e.key.toLowerCase() === "n" && !typing && !e.ctrlKey && !e.metaKey) { e.preventDefault(); newConversation(); }
+  if (e.key === "/" && !/INPUT|TEXTAREA/.test(document.activeElement.tagName) && !input.disabled) { e.preventDefault(); input.focus(); }
 });
 
-/* Mobile history drawer */
-const shell = document.getElementById("shell"), toggle = document.getElementById("historyToggle");
-function closeHistory() { shell.classList.remove("show-history"); toggle.setAttribute("aria-expanded", "false"); toggle.textContent = "Historial"; }
+const shell = document.getElementById("shell"), toggle = document.getElementById("caseToggle");
+function closeCase() { shell.classList.remove("show-case"); toggle.setAttribute("aria-expanded", "false"); toggle.textContent = "Tu caso"; }
 toggle.addEventListener("click", () => {
-  const open = shell.classList.toggle("show-history");
-  toggle.setAttribute("aria-expanded", open); toggle.textContent = open ? "Volver al chat" : "Historial";
+  const open = shell.classList.toggle("show-case");
+  toggle.setAttribute("aria-expanded", open); toggle.textContent = open ? "Volver al chat" : "Tu caso";
 });
 
-/* Inactivity: close the session and wipe everything from memory */
-let idle = IDLE_LIMIT_S;
+/* Inactivity: close the session on the server and wipe the page */
+let idle = 300;
 const timer = document.getElementById("timer");
-function resetIdle() { idle = IDLE_LIMIT_S; paintTimer(); }
+function resetIdle() { idle = state.idleLimit; paintTimer(); }
 function paintTimer() {
   timer.textContent = `${Math.floor(idle / 60)}:${String(idle % 60).padStart(2, "0")}`;
   timer.classList.toggle("warn", idle <= 60);
 }
-["keydown", "pointerdown", "scroll"].forEach(ev => document.addEventListener(ev, resetIdle, { passive: true, capture: true }));
+["keydown", "pointerdown"].forEach(ev => document.addEventListener(ev, () => { if (state.phase === "active") resetIdle(); }, { passive: true, capture: true }));
 setInterval(() => {
+  if (state.phase !== "active") return;
   idle--;
-  if (idle <= 0) {
-    session.verified = false; session.otpAttempts = 0; session.otpLocked = false; session.conversations = [];
-    CARDS.forEach(c => c.status = "Activa");
-    newConversation();
-    push(activeConv(), { who: "system", text: "Cerramos tu sesión por inactividad y borramos el historial de este dispositivo." });
-    renderAll();
-    idle = IDLE_LIMIT_S;
-  }
+  if (idle <= 0) return endSession(false);
   paintTimer();
 }, 1000);
+window.addEventListener("pagehide", () => api.end());
+// A link opened in a tab that already shows the page only changes the fragment
+window.addEventListener("hashchange", () => { if (location.hash.includes("t=") && state.phase !== "active") start(); });
 
-newConversation();
+start();
 </script>
 </body>
 </html>

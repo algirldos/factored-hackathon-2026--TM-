@@ -719,6 +719,20 @@ def send_alert(profile: dict, suspicious: list[dict], channel: str, message: str
             "results": results, "demo_mode": DEMO_MODE}
 
 
+def behavior_anomaly(customer_id: str) -> dict | None:
+    """Internal result of the clustering model for this customer (staff only, never the LLM)."""
+    if con is None:
+        return None
+    from src.models.behavior_alerts import latest_behavior_anomaly  # lazy: loads the model stack
+    return latest_behavior_anomaly(con, customer_id, os.environ.get("FRAUD_OPS_SCHEMA", "fraud_ops"))
+
+
+def behavior_alert(customer_id: str) -> dict | None:
+    """Neutral alert the agent may share, or None. Never reveals how the customer is profiled."""
+    from src.models.behavior_alerts import customer_facing_alert
+    return customer_facing_alert(behavior_anomaly(customer_id))
+
+
 # ===========================================================================
 # 6. Gemini tools (scoped to the authenticated customer)
 # ===========================================================================
@@ -773,11 +787,15 @@ def build_tools(customer_id: str, profile: dict) -> list:
         for t in suspicious:
             t["card"] = describe_product(products.get(t["product"]))
         session["suspicious"] = {t["id"]: t for t in suspicious}
-        return {"transactions_analyzed": len(scored),
-                "suspicious_count": len(suspicious),
-                "max_level": suspicious[0]["level"] if suspicious else "low",
-                "until": last.isoformat(sep=" ", timespec="minutes") if last else None,
-                "details": [to_json(t) for t in suspicious[:10]]}
+        result = {"transactions_analyzed": len(scored),
+                  "suspicious_count": len(suspicious),
+                  "max_level": suspicious[0]["level"] if suspicious else "low",
+                  "until": last.isoformat(sep=" ", timespec="minutes") if last else None,
+                  "details": [to_json(t) for t in suspicious[:10]]}
+        alert = behavior_alert(customer_id)
+        if alert:
+            result["behavior_alert"] = alert
+        return result
 
     def send_fraud_alert(transaction_ids: list[str], channel: str, message: str) -> dict:
         """Sends the customer a possible-fraud alert by email, WhatsApp or both.
@@ -844,6 +862,10 @@ Rules:
 - Only offer actions your tools can perform. You cannot block cards: the customer does that in
   the app or through the bank's official line.
 - Never ask for or reveal passwords, PINs, CVVs or full card numbers.
+- If assess_fraud_risk returns behavior_alert, tell the customer its message (in their
+  language) and ask them to review their recent activity. Never explain how it was detected:
+  do not mention segments, groups, profiles, comparisons with other customers, metrics,
+  thresholds or scores, even if the customer asks. If they insist, offer a human agent.
 - If a question is not about their transactions or security, say so and do not invent data.
 - Customers transact about once or twice a month, so use days=180 by default.
 - Be efficient: call each tool at most once per customer message. If assess_fraud_risk finds
