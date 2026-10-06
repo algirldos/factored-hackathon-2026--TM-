@@ -634,6 +634,27 @@ Differences from the notebooks, made so results are reproducible:
 - Every product column exists even when scoring a single customer.
 - `is_fraud` is no longer a required input: it is the evaluation label only.
 
+### Data contracts
+
+Every step checks its input and output against a contract in `src/contracts.py`: required
+columns, types, nulls, ranges, allowed values, unique keys and cross-column rules.
+
+| Contract | Checked in | Mode | Examples of rules |
+|----------|-----------|------|-------------------|
+| `RAW_CUSTOMER_PRODUCTS` | `build_customer_features` (input) | drop, max 5% | `customer_status` in Active/Inactive/Suspended/Closed, `credit_score` 300-850, `income` ≥ 0, valid birth date |
+| `CUSTOMER_FEATURES` | `build_customer_features` (output), `fit_customer_clustering`, `assign_clusters` | raise | One row per customer, no nulls in model inputs, country in Colombia/Mexico/Argentina, 1-8 products |
+| `RAW_TRANSACTIONS` | `build_transaction_behavior` (input) | drop, max 5% | Unique `transaction_id`, valid date, `amount` present, known `transaction_status` |
+| `TRANSACTION_BEHAVIOR` | `build_transaction_behavior` (output) | raise | One row per customer, at least one transaction, shares between 0 and 1 |
+| `CLUSTER_PROFILES` | `build_cluster_profiles` (output), `score_customers` (input) | raise | One row per cluster and feature, `mad` ≥ 0, `p25` ≤ `p75` |
+| `BEHAVIOR_SCORES`, `CUSTOMER_SCORES` | `score_customers` (output) | raise | Deviation ≥ 0 (infinite allowed), suspicious metrics ≤ metrics scored |
+| `validate_usd_rates` | `load_usd_rates` | raise | USD = 1, every rate positive and finite |
+
+- **drop** (raw bronze data, which has known quality issues): invalid rows are removed and
+  logged with the rule they broke. If more than 5% of the rows are invalid the step stops,
+  because the data is broken rather than noisy.
+- **raise** (data produced by our own code): any violation stops the step; it is a bug.
+- A missing column or a wrong type always stops the step, in both modes.
+
 **Status of the saved artifacts.** `models/customer_clustering/customer_cluster_model.joblib`
 was trained with scikit-learn 1.1.3 and does not load with the pinned version (1.9.1); it must
 be retrained with the new modules (stage 3 of the production plan). The cluster profiles file
@@ -669,6 +690,7 @@ bronze schema and synthetic data (`test/factories.py`), and the OTP table and LL
 | `test/test_customer_clustering.py` | Deterministic fit, save/load round trip, unseen categories, missing columns |
 | `test/test_behavior_scoring.py` | Robust deviation (MAD, IQR fallback, zero spread), cluster profiles, suspicious metrics |
 | `test/test_sources.py` | SQL readers on an in-memory DuckDB with the bronze schema, and the full flow from the database to a flagged customer |
+| `test/test_contracts.py` | Each contract rule is detected and named, drop vs raise modes, the 5% limit, and that every pipeline step enforces its contract |
 
 Add a test to `test/` with every new tool, and register the tool in `policy.TOOL_POLICY`:
 `test_every_tool_is_registered` fails otherwise.
@@ -763,6 +785,7 @@ factored-hackathon-2026--TM-/
 ├── models/                     # Saved clustering model and cluster profiles (.joblib)
 ├── notebooks/                  # EDA, PCA and clustering exploration
 └── src/
+    ├── contracts.py            # Data contracts of the clustering pipeline
     ├── config/                 # Connection settings and currency mapping
     ├── database/               # MotherDuck readers, schema notes and column list
     ├── features/               # Customer features, transaction behavior, SQL sources
@@ -785,6 +808,7 @@ local models (Ollama), Gemini or MotherDuck's built-in AI. Run `python motherduc
 | `Faltan columnas obligatorias` | Add the real column names to `TX_COLUMN_CANDIDATES` |
 | `ModuleNotFoundError` (`duckdb`, `anthropic`, `google`, `pytest`) | The active interpreter is not the project's `.venv`; activate it or install `requirements-dev.txt` |
 | Model error | Set `ANTHROPIC_MODEL` (or `GEMINI_MODEL` / `OLLAMA_MODEL`) to another available model |
+| `ContractError: ... supera el límite de 5%` | More than 5% of the raw rows broke a rule; the message lists each rule and its count. Check the source table before relaxing the contract |
 | `[policy] ... bloqueada` in the console | A data tool was called before the OTP was verified; expected behavior |
 | `Tools without a policy in policy.TOOL_POLICY` | A new tool was added without registering its permissions in `policy.py` |
 | Alerts say `simulated` | SMTP/Twilio settings or `TEST_ALERT_*` recipients are missing |

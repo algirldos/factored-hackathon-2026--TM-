@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 from factories import AS_OF, COUNTRY_CURRENCY, USD_RATES, raw_users
+from src.contracts import ContractError
 from src.features.customer_features import (DEBT_PRODUCTS, FEATURE_COLUMNS, PRODUCT_COLUMNS,
                                             age_at, build_customer_features)
 
@@ -61,12 +62,12 @@ def test_ineligible_customers_are_excluded():
     users.loc[users["customer_id"] == "CLI-0003", "country"] = "Atlantis"     # no currency
     users = pd.concat([users, pd.DataFrame([{**users.iloc[0].to_dict(), "customer_id": "CLI-NOPROD",
                                              "customer_status": "Active", "product_type": None,
-                                             "currency": None, "current_balance": None}])])
+                                             "currency": None, "current_balance": float("nan")}])])
 
     kept = set(build(users)["customer_id"])
     assert kept == {"CLI-0004", "CLI-0005"}
 
 
 def test_missing_raw_column_raises():
-    with pytest.raises(KeyError, match="income"):
+    with pytest.raises(ContractError, match="income"):
         build(raw_users().drop(columns=["income"]))

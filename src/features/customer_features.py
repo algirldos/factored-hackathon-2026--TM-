@@ -16,15 +16,10 @@ import logging
 
 import pandas as pd
 
+from src.contracts import CUSTOMER_FEATURES, RAW_CUSTOMER_PRODUCTS, validate
 from src.features.currency import normalize_key
 
 log = logging.getLogger(__name__)
-
-RAW_COLUMNS = [
-    "customer_id", "date_of_birth", "country", "segment", "credit_score", "income",
-    "occupation", "education_level", "customer_status", "product_type", "currency",
-    "current_balance",
-]
 
 DEBT_PRODUCTS = ["Préstamo Hipotecario", "Préstamo Personal", "Tarjeta Crédito"]
 ASSET_PRODUCTS = ["Cuenta Ahorro", "Cuenta Corriente", "Seguro", "Inversión", "Tarjeta Débito"]
@@ -37,12 +32,6 @@ CUSTOMER_INFO_COLUMNS = [
 ]
 FEATURE_COLUMNS = [*CUSTOMER_INFO_COLUMNS, *PRODUCT_COLUMNS, "num_products", "Deuda_usd",
                    "Activos_financieros_usd", "Edad"]
-
-
-def require_columns(df: pd.DataFrame, columns: list[str], where: str) -> None:
-    missing = [c for c in columns if c not in df.columns]
-    if missing:
-        raise KeyError(f"{where}: faltan columnas {missing}")
 
 
 def age_at(date_of_birth: pd.Series, as_of) -> pd.Series:
@@ -74,7 +63,7 @@ def add_usd_amounts(users: pd.DataFrame, country_currency: dict[str, str],
 def build_customer_features(users: pd.DataFrame, as_of, country_currency: dict[str, str],
                             usd_rates: dict[str, float]) -> pd.DataFrame:
     """Sections 1 and 2 of 01_eda: one row per eligible customer."""
-    require_columns(users, RAW_COLUMNS, "build_customer_features")
+    users, _ = validate(users, RAW_CUSTOMER_PRODUCTS, mode="drop")
     active = add_usd_amounts(filter_active_customers(users), country_currency, usd_rates)
 
     no_income = active["income_usd"].isna()
@@ -104,4 +93,6 @@ def build_customer_features(users: pd.DataFrame, as_of, country_currency: dict[s
 
     # Section 2: customers whose products show no balance add nothing to the segmentation
     features = features[features["num_products"] > 0]
-    return features[FEATURE_COLUMNS].sort_values("customer_id").reset_index(drop=True)
+    features = features[FEATURE_COLUMNS].sort_values("customer_id").reset_index(drop=True)
+    validate(features, CUSTOMER_FEATURES)
+    return features

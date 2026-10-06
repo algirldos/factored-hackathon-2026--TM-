@@ -7,6 +7,7 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 
+from src.contracts import CUSTOMER_FEATURES, validate
 from src.preprocessing.pipelines import CustomerPreprocessor
 
 NUMERICAL_COLUMNS = ["Edad"]
@@ -27,6 +28,7 @@ def fit_customer_clustering(features: pd.DataFrame, n_components: int = N_PCA_CO
     missing = [c for c in REQUIRED_INPUT_COLUMNS if c not in features.columns]
     if missing:
         raise KeyError(f"Faltan columnas de cliente: {missing}")
+    validate(features, CUSTOMER_FEATURES)
     preprocessor = CustomerPreprocessor(log_columns=LOG_COLUMNS,
                                         numerical_columns=NUMERICAL_COLUMNS,
                                         categorical_columns=CATEGORICAL_COLUMNS)
@@ -65,6 +67,7 @@ def assign_clusters(bundle: dict, features: pd.DataFrame) -> pd.DataFrame:
     if features.empty:
         return pd.DataFrame({"customer_id": pd.Series(dtype="object"),
                              "cluster": pd.Series(dtype="int64")})
+    validate(features, CUSTOMER_FEATURES)
     x_pca = bundle["pca"].transform(bundle["preprocessor"].transform(features))
     return pd.DataFrame({"customer_id": features["customer_id"].to_numpy(),
                          "cluster": bundle["kmeans"].predict(x_pca).astype("int64")})

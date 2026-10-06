@@ -7,6 +7,7 @@ version (last_updated), transactions keep one row per transaction_id.
 """
 import pandas as pd
 
+from src.contracts import validate_usd_rates
 from src.features.currency import usd_rates_from_rows
 
 CUSTOMERS_TABLE = "bronze.customers"
@@ -72,4 +73,6 @@ def load_usd_rates(con, as_of) -> dict[str, float]:
     rows = con.execute(sql, [pd.Timestamp(as_of).date()]).fetchall()
     if not rows:
         raise LookupError(f"No hay tasas de cambio en {RATES_TABLE} en o antes de {as_of}")
-    return usd_rates_from_rows(rows)
+    rates = usd_rates_from_rows(rows)
+    validate_usd_rates(rates)
+    return rates

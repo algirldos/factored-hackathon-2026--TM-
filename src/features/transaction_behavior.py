@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from src.contracts import RAW_TRANSACTIONS, TRANSACTION_BEHAVIOR, validate
 from src.preprocessing.pipelines import TransactionBehaviorPipeline
 
 BASELINE_MONTHS = 12
@@ -71,11 +72,12 @@ def build_transaction_behavior(transactions: pd.DataFrame, window: Window) -> pd
     """One row per customer with the behavior metrics of the window."""
     if transactions.empty:
         return pd.DataFrame(columns=["customer_id"])
+    transactions, _ = validate(clean_transaction_amounts(transactions), RAW_TRANSACTIONS,
+                               mode="drop")
     pipeline = TransactionBehaviorPipeline(period_start=window.start,
                                            period_end=window.end - pd.Timedelta(days=1))
-    behavior = pipeline.fit_transform(clean_transaction_amounts(transactions))
-    if not behavior["customer_id"].is_unique:
-        raise ValueError("TransactionBehaviorPipeline debe devolver una fila por cliente.")
+    behavior = pipeline.fit_transform(transactions)
+    validate(behavior, TRANSACTION_BEHAVIOR)
     return behavior
 
 

@@ -8,6 +8,8 @@ deviations away from the median of the customer's cluster.
 import numpy as np
 import pandas as pd
 
+from src.contracts import BEHAVIOR_SCORES, CLUSTER_PROFILES, CUSTOMER_SCORES, validate
+
 SUSPICIOUS_DEVIATION = 3.0
 MAD_TO_STD = 1.4826   # MAD -> standard deviation for normal data
 IQR_TO_STD = 1.349    # IQR -> standard deviation for normal data
@@ -33,7 +35,10 @@ def build_cluster_profiles(baseline_behavior: pd.DataFrame, clusters: pd.DataFra
                          "p25": values.quantile(0.25), "p75": values.quantile(0.75),
                          "p95": values.quantile(0.95),
                          "mad": float(np.median(np.abs(values - median)))})
-    return pd.DataFrame(rows)
+    profiles = pd.DataFrame(rows, columns=["cluster", "feature", "count", "mean", "median",
+                                           "p25", "p75", "p95", "mad"])
+    validate(profiles, CLUSTER_PROFILES)
+    return profiles
 
 
 def robust_deviation_score(value: float, median: float, mad: float, p25: float,
@@ -89,6 +94,7 @@ def score_customers(recent_behavior: pd.DataFrame, clusters: pd.DataFrame,
     Score every customer that has a cluster and recent activity.
     Returns (detail: one row per customer and feature, summary: one row per customer).
     """
+    validate(profiles, CLUSTER_PROFILES)   # profiles may come from a saved file
     data = clusters.merge(recent_behavior, on="customer_id", how="inner")
     details, summaries = [], []
     for _, row in data.iterrows():
@@ -105,4 +111,6 @@ def score_customers(recent_behavior: pd.DataFrame, clusters: pd.DataFrame,
     summary = pd.DataFrame(summaries, columns=["customer_id", "cluster", "anomaly_score",
                                                "n_features", "n_suspicious",
                                                "suspicious_features"])
+    validate(detail, BEHAVIOR_SCORES)
+    validate(summary, CUSTOMER_SCORES)
     return detail, summary
